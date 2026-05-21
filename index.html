@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>LiveWatch · Livepeer Delegator Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #050a0e; --surface: #0c1419; --border: #1a2830; --border2: #243540;
+    --text: #e8f4f0; --muted: #4a7a8a; --accent: #00e5a0; --accent2: #00b8ff;
+    --warn: #ff6b35; --danger: #ff3b5c;
+    --font-display: 'Syne', sans-serif; --font-mono: 'IBM Plex Mono', monospace;
+  }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-mono); min-height: 100vh; overflow-x: hidden; }
+  body::before {
+    content: ''; position: fixed; inset: 0;
+    background-image: linear-gradient(rgba(0,229,160,.03) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(0,229,160,.03) 1px, transparent 1px);
+    background-size: 40px 40px; pointer-events: none; z-index: 0;
+  }
+  #root { position: relative; z-index: 1; }
+  .app { max-width: 1100px; margin: 0 auto; padding: 32px 24px 80px; }
+
+  .header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid var(--border); gap: 16px; flex-wrap: wrap; }
+  .logo { font-family: var(--font-display); font-size: 28px; font-weight: 800; letter-spacing: -0.5px; }
+  .logo span { color: var(--accent); }
+  .logo small { display: block; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; margin-top: 2px; }
+  .live-dot { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); letter-spacing: 1px; }
+  .live-dot .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; flex-shrink: 0; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.8)} }
+
+  /* Wallet manager */
+  .wallets-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+  .wallet-chip { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border2); border-radius: 20px; padding: 6px 14px; font-size: 11px; cursor: pointer; transition: all .15s; }
+  .wallet-chip:hover { border-color: var(--accent); }
+  .wallet-chip.active { background: rgba(0,229,160,.12); border-color: var(--accent); color: var(--accent); }
+  .wallet-chip .x { color: var(--muted); padding-left: 4px; border-left: 1px solid var(--border2); margin-left: 4px; }
+  .wallet-chip .x:hover { color: var(--danger); }
+  .wallet-chip img { width: 16px; height: 16px; border-radius: 50%; }
+
+  .search-wrap { display: flex; gap: 12px; margin-bottom: 16px; }
+  .search-input { flex: 1; background: var(--surface); border: 1px solid var(--border2); border-radius: 4px; padding: 14px 18px; font-family: var(--font-mono); font-size: 13px; color: var(--text); outline: none; transition: border-color .2s; min-width: 0; }
+  .search-input::placeholder { color: var(--muted); }
+  .search-input:focus { border-color: var(--accent); }
+
+  .btn { background: var(--accent); color: var(--bg); border: none; border-radius: 4px; padding: 14px 28px; font-family: var(--font-display); font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; transition: opacity .2s, transform .1s; white-space: nowrap; }
+  .btn:hover { opacity: .85; }
+  .btn:active { transform: scale(.98); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-ghost { background: transparent; border: 1px solid var(--border2); color: var(--muted); font-family: var(--font-mono); font-size: 11px; padding: 8px 14px; border-radius: 3px; cursor: pointer; transition: border-color .2s, color .2s; white-space: nowrap; }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-ghost.danger:hover { border-color: var(--danger); color: var(--danger); }
+
+  .controls-bar { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 24px; margin-bottom: 20px; }
+  .card-title { font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: var(--muted); margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .badge { font-size: 10px; padding: 3px 8px; border-radius: 2px; letter-spacing: 1px; }
+  .badge-active { background: rgba(0,229,160,.15); color: var(--accent); }
+  .badge-warn { background: rgba(255,107,53,.15); color: var(--warn); }
+
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; margin-bottom: 20px; }
+  .stat { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 16px; }
+  .stat-label { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+  .stat-value { font-size: 20px; font-weight: 600; color: var(--text); word-break: break-all; }
+  .stat-value.accent { color: var(--accent); }
+  .stat-value.accent2 { color: var(--accent2); }
+  .stat-sub { font-size: 10px; color: var(--muted); margin-top: 4px; }
+
+  .alerts-list { display: flex; flex-direction: column; gap: 10px; }
+  .alert-item { display: flex; align-items: flex-start; gap: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 12px 16px; animation: slideIn .3s ease; }
+  .alert-item.warn { border-left: 3px solid var(--warn); }
+  .alert-item.good { border-left: 3px solid var(--accent); }
+  @keyframes slideIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+  .alert-icon { font-size: 16px; line-height: 1; margin-top: 1px; }
+  .alert-body { flex: 1; }
+  .alert-msg { font-size: 12px; color: var(--text); line-height: 1.5; }
+  .alert-time { font-size: 10px; color: var(--muted); margin-top: 3px; }
+  .alert-dismiss { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 0; }
+  .alert-dismiss:hover { color: var(--text); }
+  .no-alerts { text-align: center; padding: 28px; color: var(--muted); font-size: 12px; letter-spacing: 1px; }
+
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); padding: 8px 12px; border-bottom: 1px solid var(--border); font-weight: 500; }
+  td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,.02); }
+  .changed-rc { color: var(--warn); }
+  .changed-rc::after { content: ' ▲'; font-size: 8px; }
+  .td-mono { font-family: var(--font-mono); }
+
+  /* Orch profile header */
+  .orch-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; padding: 16px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+  .orch-avatar { width: 56px; height: 56px; border-radius: 50%; background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%); flex-shrink: 0; object-fit: cover; }
+  .orch-info { flex: 1; min-width: 0; }
+  .orch-name { font-family: var(--font-display); font-size: 18px; font-weight: 700; color: var(--text); }
+  .orch-addr { font-family: var(--font-mono); font-size: 11px; color: var(--accent2); word-break: break-all; margin-top: 4px; }
+
+  .row { display: flex; gap: 20px; }
+  .row > * { flex: 1; }
+
+  .empty { text-align: center; padding: 60px 24px; color: var(--muted); }
+  .empty h2 { font-family: var(--font-display); font-size: 18px; font-weight: 700; margin-bottom: 8px; color: var(--text); }
+  .empty p { font-size: 12px; line-height: 1.7; }
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border2); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 8px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error-msg { background: rgba(255,59,92,.1); border: 1px solid rgba(255,59,92,.3); border-radius: 4px; padding: 12px 16px; font-size: 11px; color: var(--danger); margin-bottom: 20px; white-space: pre-wrap; font-family: var(--font-mono); line-height: 1.6; }
+  .footer-note { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border); font-size: 10px; color: var(--muted); text-align: center; letter-spacing: 1px; line-height: 1.7; }
+
+  /* Mini chart */
+  .mini-chart { display: flex; align-items: flex-end; gap: 3px; height: 60px; margin-top: 16px; }
+  .bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; }
+  .bar { width: 100%; border-radius: 2px 2px 0 0; cursor: pointer; min-height: 2px; }
+  .bar:hover { opacity: .7; }
+  .bar-label { font-size: 9px; color: var(--muted); }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 4px; margin-bottom: 16px; background: var(--bg); padding: 4px; border-radius: 4px; width: fit-content; border: 1px solid var(--border); flex-wrap: wrap; }
+  .tab { padding: 6px 16px; border-radius: 3px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; background: none; border: none; color: var(--muted); font-family: var(--font-mono); transition: background .15s, color .15s; }
+  .tab.active { background: var(--accent); color: var(--bg); font-weight: 600; }
+
+  /* Compare modal */
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; animation: fadeIn .2s; }
+  @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+  .modal { background: var(--surface); border: 1px solid var(--border2); border-radius: 8px; max-width: 900px; width: 100%; max-height: 90vh; overflow-y: auto; padding: 32px; }
+  .modal-close { float: right; background: none; border: none; color: var(--muted); font-size: 24px; cursor: pointer; line-height: 1; }
+  .modal-close:hover { color: var(--text); }
+  .modal-title { font-family: var(--font-display); font-size: 22px; font-weight: 700; margin-bottom: 24px; }
+  .compare-rank { color: var(--muted); font-size: 11px; width: 28px; text-align: right; }
+  .compare-name { display: flex; align-items: center; gap: 10px; }
+  .compare-name img { width: 24px; height: 24px; border-radius: 50%; }
+  .compare-row-me { background: rgba(0,229,160,.06); }
+  .compare-row-me td:first-child::before { content: '★ '; color: var(--accent); }
+
+  @media (max-width: 640px) {
+    .row { flex-direction: column; }
+    .header { flex-direction: column; align-items: flex-start; }
+    .stats-grid { grid-template-columns: 1fr 1fr; }
+    .modal { padding: 20px; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback, useRef } = React;
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const API_BASE = "https://livepeer-network-api.cloudspe.com/api/v1";
+const POLL_INTERVAL = 60_000;
+
+// ─── API client ──────────────────────────────────────────────────────────────
+async function api(path, params = {}) {
+  const qs = Object.entries(params)
+    .filter(([_, v]) => v !== undefined && v !== null && v !== "")
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join("&");
+  const url = `${API_BASE}${path}${qs ? "?" + qs : ""}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    let body = "";
+    try { body = (await res.json())?.error?.message || ""; } catch {}
+    throw new Error(`API ${res.status}: ${path}${body ? " — " + body : ""}`);
+  }
+  return res.json();
+}
+
+// ─── Formatting helpers ──────────────────────────────────────────────────────
+function lpt(val) {
+  if (val == null) return "—";
+  const n = Number(val);
+  if (n === 0) return "0.0000 LPT";
+  // API returns LPT amounts as decimal strings already scaled to LPT (not wei)
+  // Check if number is > 1e15, likely raw wei
+  if (n > 1e15) return (n / 1e18).toFixed(4) + " LPT";
+  return n.toFixed(4) + " LPT";
+}
+function eth(val) {
+  if (val == null) return "—";
+  const n = Number(val);
+  if (n === 0) return "0.0000 ETH";
+  if (n > 1e15) return (n / 1e18).toFixed(6) + " ETH";
+  return n.toFixed(6) + " ETH";
+}
+function usd(val) {
+  if (val == null) return "—";
+  return "$" + Number(val).toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+function pct(val) {
+  if (val == null) return "—";
+  return Number(val).toFixed(2) + "%";
+}
+function shortAddr(addr) {
+  if (!addr) return "";
+  return addr.slice(0, 6) + "…" + addr.slice(-4);
+}
+function fmtDate(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString();
+}
+function fmtDateTime(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString();
+}
+
+// ─── LocalStorage helpers ────────────────────────────────────────────────────
+const STORAGE = {
+  getWallets: () => {
+    try { return JSON.parse(localStorage.getItem("lw_wallets") || "[]"); }
+    catch { return []; }
+  },
+  setWallets: (w) => localStorage.setItem("lw_wallets", JSON.stringify(w)),
+  getActive: () => localStorage.getItem("lw_active") || "",
+  setActive: (a) => localStorage.setItem("lw_active", a),
+  getAlertSnapshot: (addr) => {
+    try { return JSON.parse(localStorage.getItem(`lw_snap_${addr}`) || "null"); }
+    catch { return null; }
+  },
+  setAlertSnapshot: (addr, snap) => localStorage.setItem(`lw_snap_${addr}`, JSON.stringify(snap)),
+  notifEnabled: () => localStorage.getItem("lw_notif") === "1",
+  setNotifEnabled: (v) => localStorage.setItem("lw_notif", v ? "1" : "0"),
+};
+
+// ─── Notifications ───────────────────────────────────────────────────────────
+async function requestNotificationPermission() {
+  if (!("Notification" in window)) return false;
+  if (Notification.permission === "granted") return true;
+  if (Notification.permission === "denied") return false;
+  const result = await Notification.requestPermission();
+  return result === "granted";
+}
+function showNotification(title, body) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  try { new Notification(title, { body, icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%2300e5a0'/></svg>" }); }
+  catch (e) { console.warn("notify failed", e); }
+}
+
+// ─── CSV download ────────────────────────────────────────────────────────────
+async function downloadCsv(filename, url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`CSV download failed: ${res.status}`);
+  const blob = await res.blob();
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+function App() {
+  const [wallets, setWallets]       = useState(STORAGE.getWallets());
+  const [activeAddr, setActiveAddr] = useState(STORAGE.getActive());
+  const [walletInput, setWalletInput] = useState("");
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState(null);
+  const [delegator, setDelegator]   = useState(null);
+  const [orchestrator, setOrchestrator] = useState(null);
+  const [cutsHistory, setCutsHistory] = useState([]);
+  const [stakeHistory, setStakeHistory] = useState([]);
+  const [netEcon, setNetEcon]       = useState(null);
+  const [networkStats, setNetworkStats] = useState(null);
+  const [alerts, setAlerts]         = useState([]);
+  const [lastPoll, setLastPoll]     = useState(null);
+  const [progress, setProgress]     = useState("");
+  const [notifEnabled, setNotifEnabled] = useState(STORAGE.notifEnabled());
+  const [showCompare, setShowCompare] = useState(false);
+  const [topOrchs, setTopOrchs]     = useState([]);
+  const [loadingCompare, setLoadingCompare] = useState(false);
+
+  const detectChanges = (addr, prevCuts, nextCuts) => {
+    const newAlerts = [];
+    if (!prevCuts || !nextCuts || prevCuts.length === 0 || nextCuts.length === 0) return newAlerts;
+    const prevTop = prevCuts[0];
+    const nextTop = nextCuts[0];
+    if (prevTop.event_id === nextTop.event_id) return newAlerts;
+    // New cut change detected
+    const rcChanged = prevTop.reward_cut_percent !== nextTop.reward_cut_percent;
+    const fcChanged = prevTop.fee_cut_percent !== nextTop.fee_cut_percent;
+    if (rcChanged) {
+      const up = Number(nextTop.reward_cut_percent) > Number(prevTop.reward_cut_percent);
+      const msg = `Reward cut ${up?"↑ increased":"↓ decreased"}: ${pct(prevTop.reward_cut_percent)} → ${pct(nextTop.reward_cut_percent)}`;
+      newAlerts.push({ id: Date.now()+1, type: up?"warn":"good", icon: up?"⚠️":"✅", msg, time: new Date().toLocaleTimeString(), addr });
+      if (notifEnabled) showNotification("Reward cut changed", `${shortAddr(addr)}: ${msg}`);
+    }
+    if (fcChanged) {
+      const up = Number(nextTop.fee_cut_percent) > Number(prevTop.fee_cut_percent);
+      const msg = `Fee cut ${up?"↑ increased":"↓ decreased"}: ${pct(prevTop.fee_cut_percent)} → ${pct(nextTop.fee_cut_percent)}`;
+      newAlerts.push({ id: Date.now()+2, type: up?"warn":"good", icon: up?"⚠️":"✅", msg, time: new Date().toLocaleTimeString(), addr });
+      if (notifEnabled) showNotification("Fee cut changed", `${shortAddr(addr)}: ${msg}`);
+    }
+    return newAlerts;
+  };
+
+  const fetchAll = useCallback(async (addr) => {
+    if (!addr) return;
+    setLoading(true);
+    setError(null);
+    try {
+      setProgress("Loading delegator portfolio…");
+      const del = await api(`/delegators/${addr}`);
+      setDelegator(del);
+
+      if (!del.delegations || del.delegations.length === 0) {
+        setError("Delegator has no active delegations.");
+        setOrchestrator(null); setCutsHistory([]); setStakeHistory([]); setNetEcon(null);
+        return;
+      }
+
+      const orchAddr = del.delegations[0].delegate_address;
+
+      setProgress("Loading orchestrator data…");
+      const [orch, cuts, stakeHist, netE, netStats] = await Promise.all([
+        api(`/orchestrators/${orchAddr}`),
+        api(`/orchestrators/${orchAddr}/cuts-history`),
+        api(`/orchestrators/${orchAddr}/stake-history`),
+        api(`/orchestrators/${orchAddr}/net-economics`, { period_days: 30 }),
+        api(`/network/stats`).catch(() => null),
+      ]);
+
+      // Detect changes vs previous snapshot
+      const prevSnap = STORAGE.getAlertSnapshot(addr);
+      const cutsData = cuts.data || [];
+      if (prevSnap?.cuts) {
+        const newAlerts = detectChanges(addr, prevSnap.cuts, cutsData);
+        if (newAlerts.length) setAlerts(p => [...newAlerts, ...p].slice(0, 30));
+      }
+      STORAGE.setAlertSnapshot(addr, { cuts: cutsData });
+
+      setOrchestrator(orch);
+      setCutsHistory(cutsData);
+      setStakeHistory(stakeHist.data || []);
+      setNetEcon(netE);
+      setNetworkStats(netStats);
+      setLastPoll(new Date());
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+      setProgress("");
+    }
+  }, [notifEnabled]);
+
+  useEffect(() => {
+    if (!activeAddr) return;
+    fetchAll(activeAddr);
+    const id = setInterval(() => fetchAll(activeAddr), POLL_INTERVAL);
+    return () => clearInterval(id);
+  }, [activeAddr, fetchAll]);
+
+  const addWallet = () => {
+    const t = walletInput.trim().toLowerCase();
+    if (!/^0x[a-f0-9]{40}$/.test(t)) {
+      setError("Invalid Ethereum address. Must be 0x + 40 hex characters.");
+      return;
+    }
+    setError(null);
+    if (!wallets.includes(t)) {
+      const updated = [...wallets, t];
+      setWallets(updated);
+      STORAGE.setWallets(updated);
+    }
+    STORAGE.setActive(t);
+    setActiveAddr(t);
+    setWalletInput("");
+    setAlerts([]);
+  };
+
+  const switchWallet = (addr) => {
+    STORAGE.setActive(addr);
+    setActiveAddr(addr);
+    setAlerts([]);
+  };
+
+  const removeWallet = (addr, e) => {
+    e.stopPropagation();
+    const updated = wallets.filter(w => w !== addr);
+    setWallets(updated);
+    STORAGE.setWallets(updated);
+    localStorage.removeItem(`lw_snap_${addr}`);
+    if (activeAddr === addr) {
+      const next = updated[0] || "";
+      STORAGE.setActive(next);
+      setActiveAddr(next);
+      if (!next) { setDelegator(null); setOrchestrator(null); }
+    }
+  };
+
+  const toggleNotifications = async () => {
+    if (notifEnabled) {
+      STORAGE.setNotifEnabled(false);
+      setNotifEnabled(false);
+    } else {
+      const ok = await requestNotificationPermission();
+      if (ok) {
+        STORAGE.setNotifEnabled(true);
+        setNotifEnabled(true);
+        showNotification("LiveWatch notifications enabled", "You'll be notified when reward/fee cuts change.");
+      } else {
+        setError("Browser denied notification permission. Enable it in your browser settings.");
+      }
+    }
+  };
+
+  const exportRewardsCsv = async () => {
+    if (!orchestrator) return;
+    const end = new Date().toISOString().slice(0,10);
+    const startD = new Date(); startD.setDate(startD.getDate() - 365);
+    const start = startD.toISOString().slice(0,10);
+    const url = `${API_BASE}/reports/rewards.csv?orchestrator=${orchestrator.address}&start=${start}&end=${end}`;
+    try {
+      await downloadCsv(`livepeer-rewards-${orchestrator.address.slice(0,8)}-${start}-to-${end}.csv`, url);
+    } catch (e) { setError(`CSV export failed: ${e.message}`); }
+  };
+
+  const openCompare = async () => {
+    setShowCompare(true);
+    if (topOrchs.length > 0) return;
+    setLoadingCompare(true);
+    try {
+      const res = await api(`/orchestrators`, { active_only: true, limit: 100 });
+      setTopOrchs(res.data || []);
+    } catch (e) {
+      setError(`Compare failed: ${e.message}`);
+      setShowCompare(false);
+    } finally {
+      setLoadingCompare(false);
+    }
+  };
+
+  // Find the current orchestrator's rank
+  const myOrchRank = orchestrator && topOrchs.length
+    ? topOrchs.findIndex(o => o.address.toLowerCase() === orchestrator.address.toLowerCase()) + 1
+    : 0;
+
+  const myDelegation = delegator?.delegations?.[0];
+
+  return (
+    <div className="app">
+      <header className="header">
+        <div className="logo">
+          LIVEWATCH<span>.</span>
+          <small>Livepeer Delegator Monitor · Arbitrum One</small>
+        </div>
+        <div className="live-dot">
+          <span className="dot" />
+          <span>{loading && progress
+            ? progress
+            : lastPoll ? `Last sync ${lastPoll.toLocaleTimeString()}` : "Awaiting data"}</span>
+        </div>
+      </header>
+
+      {/* Saved wallets */}
+      {wallets.length > 0 && (
+        <div className="wallets-bar">
+          {wallets.map(w => (
+            <div key={w}
+                 className={`wallet-chip ${w === activeAddr ? "active" : ""}`}
+                 onClick={() => switchWallet(w)}>
+              <span>{shortAddr(w)}</span>
+              <span className="x" onClick={(e) => removeWallet(w, e)}>✕</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="search-wrap">
+        <input
+          className="search-input"
+          placeholder="Add delegator wallet (0x…)"
+          value={walletInput}
+          onChange={e => setWalletInput(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && addWallet()}
+        />
+        <button className="btn" onClick={addWallet} disabled={loading}>
+          {loading ? <><span className="spinner" />Sync</> : "Add"}
+        </button>
+      </div>
+
+      <div className="controls-bar">
+        <button className="btn-ghost" onClick={toggleNotifications}>
+          {notifEnabled ? "🔔 Notifications ON" : "🔕 Enable Notifications"}
+        </button>
+        {orchestrator && (
+          <>
+            <button className="btn-ghost" onClick={exportRewardsCsv}>
+              📥 Export Rewards CSV
+            </button>
+            <button className="btn-ghost" onClick={openCompare}>
+              📊 Compare Orchestrators
+            </button>
+          </>
+        )}
+      </div>
+
+      {error && <div className="error-msg">⚠ {error}</div>}
+
+      {!delegator && !loading && !error && (
+        <div className="empty">
+          <h2>{wallets.length === 0 ? "Add your first delegator address" : "Select a wallet above"}</h2>
+          <p>
+            Track multiple Livepeer delegator wallets,<br />
+            get notified when orchestrators change reward cuts,<br />
+            export reward history, and compare to other orchestrators.<br /><br />
+            <span style={{color:"var(--accent)"}}>Powered by Livepeer Valuation API</span>
+          </p>
+        </div>
+      )}
+
+      {delegator && orchestrator && (
+        <>
+          {/* Orchestrator profile header */}
+          <div className="orch-header">
+            {orchestrator.avatar_url
+              ? <img className="orch-avatar" src={orchestrator.avatar_url} alt="" />
+              : <div className="orch-avatar" />}
+            <div className="orch-info">
+              <div className="orch-name">
+                {orchestrator.display_name || shortAddr(orchestrator.address)}
+              </div>
+              <div className="orch-addr">{orchestrator.address}</div>
+            </div>
+            {orchestrator.is_active && <span className="badge badge-active">Active</span>}
+          </div>
+
+          {/* Alerts */}
+          <div className="card">
+            <div className="card-title">
+              <span>Alerts ({alerts.length})</span>
+              {alerts.length > 0 && (
+                <button className="btn-ghost" onClick={() => setAlerts([])}>Clear all</button>
+              )}
+            </div>
+            <div className="alerts-list">
+              {alerts.length === 0
+                ? <div className="no-alerts">No alerts since last sync — parameters unchanged</div>
+                : alerts.map(a => (
+                  <div key={a.id} className={`alert-item ${a.type}`}>
+                    <span className="alert-icon">{a.icon}</span>
+                    <div className="alert-body">
+                      <div className="alert-msg">{a.msg}</div>
+                      <div className="alert-time">{a.time}{a.addr ? ` · ${shortAddr(a.addr)}` : ""}</div>
+                    </div>
+                    <button className="alert-dismiss" onClick={() => setAlerts(p => p.filter(x => x.id !== a.id))}>✕</button>
+                  </div>
+                ))
+              }
+            </div>
+          </div>
+
+          {/* Delegator overview */}
+          <div className="card">
+            <div className="card-title">Your Position</div>
+            <div className="stats-grid">
+              <div className="stat">
+                <div className="stat-label">Bonded Principal</div>
+                <div className="stat-value accent">{lpt(myDelegation?.bonded_principal)}</div>
+              </div>
+              <div className="stat">
+                <div className="stat-label">Pending Stake</div>
+                <div className="stat-value">{lpt(myDelegation?.pending_stake)}</div>
+              </div>
+              <div className="stat">
+                <div className="stat-label">Pending Fees</div>
+                <div className="stat-value accent2">{eth(myDelegation?.pending_fees)}</div>
+              </div>
+              <div className="stat">
+                <div className="stat-label">First Bond</div>
+                <div className="stat-value" style={{fontSize:14}}>Block {delegator.first_bond_block || "—"}</div>
+              </div>
+              <div className="stat">
+                <div className="stat-label">Last Seen</div>
+                <div className="stat-value" style={{fontSize:14}}>Block {delegator.last_seen_block || "—"}</div>
+              </div>
+              <div className="stat">
+                <div className="stat-label">Status</div>
+                <div className="stat-value" style={{fontSize:14, color: delegator.is_active ? "var(--accent)" : "var(--muted)"}}>
+                  {delegator.is_active ? "Active ✓" : "Inactive"}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Orchestrator current params */}
+          <div className="row">
+            <div className="card">
+              <div className="card-title">Reward Cut</div>
+              <div className="stat-value accent" style={{fontSize:36,fontWeight:700}}>{pct(orchestrator.reward_cut_percent)}</div>
+              <div className="stat-sub">% kept by orchestrator from inflation rewards</div>
+            </div>
+            <div className="card">
+              <div className="card-title">Fee Cut</div>
+              <div className="stat-value accent2" style={{fontSize:36,fontWeight:700}}>{pct(orchestrator.fee_cut_percent)}</div>
+              <div className="stat-sub">% kept by orchestrator from transcoding fees</div>
+            </div>
+            <div className="card">
+              <div className="card-title">Total Stake</div>
+              <div className="stat-value" style={{fontSize:28,fontWeight:700}}>{lpt(orchestrator.total_stake)}</div>
+              <div className="stat-sub">Combined orch + delegator stake</div>
+            </div>
+          </div>
+
+          {/* 30-day net economics */}
+          {netEcon && (
+            <div className="card">
+              <div className="card-title">30-Day Net Economics (Orchestrator)</div>
+              <div className="stats-grid">
+                <div className="stat">
+                  <div className="stat-label">Gross Payouts</div>
+                  <div className="stat-value accent">{usd(netEcon.gross_payouts_usd)}</div>
+                  <div className="stat-sub">From transcoding tickets</div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Gross Rewards</div>
+                  <div className="stat-value accent2">{usd(netEcon.gross_rewards_usd)}</div>
+                  <div className="stat-sub">From inflation</div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Gas Cost</div>
+                  <div className="stat-value warn">{eth(netEcon.gas_cost_native_eth)}</div>
+                  <div className="stat-sub">Tx fees paid (ETH)</div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Gross Total</div>
+                  <div className="stat-value">{usd(netEcon.gross_total_usd)}</div>
+                  <div className="stat-sub">Payouts + rewards (USD)</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Cuts history */}
+          <div className="card">
+            <div className="card-title">Cut Change History (TranscoderUpdate events)</div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Date</th><th>Reward Cut</th><th>Fee Cut</th><th>Fee Share</th><th>Block</th></tr>
+                </thead>
+                <tbody>
+                  {cutsHistory.length === 0
+                    ? <tr><td colSpan={5} style={{textAlign:"center",color:"var(--muted)",padding:24}}>No cut changes on record</td></tr>
+                    : cutsHistory.slice(0, 15).map((c, i) => {
+                        const prev = cutsHistory[i+1];
+                        const rcChanged = prev && c.reward_cut_percent !== prev.reward_cut_percent;
+                        const fcChanged = prev && c.fee_cut_percent !== prev.fee_cut_percent;
+                        return (
+                          <tr key={c.event_id}>
+                            <td>{fmtDate(c.block_timestamp)}</td>
+                            <td className={rcChanged ? "changed-rc" : ""}>{pct(c.reward_cut_percent)}</td>
+                            <td className={fcChanged ? "changed-rc" : ""}>{pct(c.fee_cut_percent)}</td>
+                            <td>{pct(c.fee_share_percent)}</td>
+                            <td className="td-mono">{c.block_number}</td>
+                          </tr>
+                        );
+                      })
+                  }
+                </tbody>
+              </table>
+            </div>
+            <div style={{marginTop:12,fontSize:10,color:"var(--muted)"}}>▲ = changed from previous event</div>
+          </div>
+
+          {/* Stake history */}
+          {stakeHistory.length > 0 && (
+            <div className="card">
+              <div className="card-title">Recent Round Stakes</div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Round</th><th>Total Stake</th><th>Reward Cut</th><th>Fee Cut</th><th>Date</th></tr>
+                  </thead>
+                  <tbody>
+                    {stakeHistory.slice(0, 10).map(s => (
+                      <tr key={s.round}>
+                        <td className="td-mono">{s.round}</td>
+                        <td className="td-mono">{lpt(s.total_stake)}</td>
+                        <td>{pct(s.reward_cut_percent)}</td>
+                        <td>{pct(s.fee_cut_percent)}</td>
+                        <td>{fmtDate(s.block_timestamp)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Network context */}
+          {networkStats && (
+            <div className="card">
+              <div className="card-title">Network Context</div>
+              <div className="stats-grid">
+                <div className="stat">
+                  <div className="stat-label">Active Orchs</div>
+                  <div className="stat-value">{networkStats.active_orchestrators}</div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Total LPT Staked</div>
+                  <div className="stat-value accent">{lpt(networkStats.total_lpt_staked)}</div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Payouts 24h</div>
+                  <div className="stat-value">{usd(networkStats.payouts_usd_24h)}</div>
+                </div>
+                <div className="stat">
+                  <div className="stat-label">Rewards 24h</div>
+                  <div className="stat-value">{usd(networkStats.rewards_usd_24h)}</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="footer-note">
+            Data from livepeer-network-api.cloudspe.com<br />
+            Polling every 60s · {wallets.length} wallet{wallets.length !== 1 ? "s" : ""} tracked · Settings saved to your browser
+          </div>
+        </>
+      )}
+
+      {/* Compare modal */}
+      {showCompare && (
+        <div className="modal-backdrop" onClick={() => setShowCompare(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setShowCompare(false)}>✕</button>
+            <div className="modal-title">Compare Active Orchestrators</div>
+            {loadingCompare && <div><span className="spinner" />Loading top 100…</div>}
+            {!loadingCompare && (
+              <>
+                {myOrchRank > 0 && (
+                  <div style={{marginBottom:16, fontSize:12, color:"var(--muted)"}}>
+                    Your orchestrator ranks <strong style={{color:"var(--accent)"}}>#{myOrchRank}</strong> of {topOrchs.length} active
+                  </div>
+                )}
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr><th>#</th><th>Orchestrator</th><th>Stake</th><th>Reward Cut</th><th>Fee Cut</th></tr>
+                    </thead>
+                    <tbody>
+                      {topOrchs.map((o, i) => {
+                        const isMe = orchestrator && o.address.toLowerCase() === orchestrator.address.toLowerCase();
+                        return (
+                          <tr key={o.address} className={isMe ? "compare-row-me" : ""}>
+                            <td className="compare-rank">{i+1}</td>
+                            <td>
+                              <div className="compare-name">
+                                {o.avatar_url && <img src={o.avatar_url} alt="" />}
+                                <div>
+                                  <div style={{fontSize:12}}>{o.display_name || shortAddr(o.address)}</div>
+                                  {o.display_name && <div style={{fontSize:10,color:"var(--muted)"}}>{shortAddr(o.address)}</div>}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="td-mono">{lpt(o.total_stake)}</td>
+                            <td>{pct(o.reward_cut_percent)}</td>
+                            <td>{pct(o.fee_cut_percent)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
