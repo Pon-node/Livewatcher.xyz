@@ -33,14 +33,12 @@
   .live-dot .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; flex-shrink: 0; }
   @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.8)} }
 
-  /* Wallet manager */
   .wallets-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
   .wallet-chip { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border2); border-radius: 20px; padding: 6px 14px; font-size: 11px; cursor: pointer; transition: all .15s; }
   .wallet-chip:hover { border-color: var(--accent); }
   .wallet-chip.active { background: rgba(0,229,160,.12); border-color: var(--accent); color: var(--accent); }
   .wallet-chip .x { color: var(--muted); padding-left: 4px; border-left: 1px solid var(--border2); margin-left: 4px; }
   .wallet-chip .x:hover { color: var(--danger); }
-  .wallet-chip img { width: 16px; height: 16px; border-radius: 50%; }
 
   .search-wrap { display: flex; gap: 12px; margin-bottom: 16px; }
   .search-input { flex: 1; background: var(--surface); border: 1px solid var(--border2); border-radius: 4px; padding: 14px 18px; font-family: var(--font-mono); font-size: 13px; color: var(--text); outline: none; transition: border-color .2s; min-width: 0; }
@@ -61,7 +59,7 @@
   .card-title { font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: var(--muted); margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
   .badge { font-size: 10px; padding: 3px 8px; border-radius: 2px; letter-spacing: 1px; }
   .badge-active { background: rgba(0,229,160,.15); color: var(--accent); }
-  .badge-warn { background: rgba(255,107,53,.15); color: var(--warn); }
+  .badge-soon { background: rgba(0,184,255,.15); color: var(--accent2); }
 
   .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; margin-bottom: 20px; }
   .stat { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 16px; }
@@ -69,19 +67,18 @@
   .stat-value { font-size: 20px; font-weight: 600; color: var(--text); word-break: break-all; }
   .stat-value.accent { color: var(--accent); }
   .stat-value.accent2 { color: var(--accent2); }
+  .stat-value.warn { color: var(--warn); }
   .stat-sub { font-size: 10px; color: var(--muted); margin-top: 4px; }
 
   .alerts-list { display: flex; flex-direction: column; gap: 10px; }
-  .alert-item { display: flex; align-items: flex-start; gap: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 12px 16px; animation: slideIn .3s ease; }
+  .alert-item { display: flex; align-items: flex-start; gap: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 12px 16px; }
   .alert-item.warn { border-left: 3px solid var(--warn); }
   .alert-item.good { border-left: 3px solid var(--accent); }
-  @keyframes slideIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
   .alert-icon { font-size: 16px; line-height: 1; margin-top: 1px; }
   .alert-body { flex: 1; }
   .alert-msg { font-size: 12px; color: var(--text); line-height: 1.5; }
   .alert-time { font-size: 10px; color: var(--muted); margin-top: 3px; }
   .alert-dismiss { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 0; }
-  .alert-dismiss:hover { color: var(--text); }
   .no-alerts { text-align: center; padding: 28px; color: var(--muted); font-size: 12px; letter-spacing: 1px; }
 
   .table-wrap { overflow-x: auto; }
@@ -94,7 +91,6 @@
   .changed-rc::after { content: ' ▲'; font-size: 8px; }
   .td-mono { font-family: var(--font-mono); }
 
-  /* Orch profile header */
   .orch-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; padding: 16px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
   .orch-avatar { width: 56px; height: 56px; border-radius: 50%; background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%); flex-shrink: 0; object-fit: cover; }
   .orch-info { flex: 1; min-width: 0; }
@@ -112,30 +108,45 @@
   .error-msg { background: rgba(255,59,92,.1); border: 1px solid rgba(255,59,92,.3); border-radius: 4px; padding: 12px 16px; font-size: 11px; color: var(--danger); margin-bottom: 20px; white-space: pre-wrap; font-family: var(--font-mono); line-height: 1.6; }
   .footer-note { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border); font-size: 10px; color: var(--muted); text-align: center; letter-spacing: 1px; line-height: 1.7; }
 
-  /* Mini chart */
-  .mini-chart { display: flex; align-items: flex-end; gap: 3px; height: 60px; margin-top: 16px; }
-  .bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; }
-  .bar { width: 100%; border-radius: 2px 2px 0 0; cursor: pointer; min-height: 2px; }
-  .bar:hover { opacity: .7; }
-  .bar-label { font-size: 9px; color: var(--muted); }
+  .toggle-group { display: flex; gap: 4px; background: var(--bg); padding: 4px; border-radius: 4px; width: fit-content; border: 1px solid var(--border); }
+  .toggle-opt { padding: 6px 14px; border-radius: 3px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; background: none; border: none; color: var(--muted); font-family: var(--font-mono); transition: background .15s, color .15s; }
+  .toggle-opt.active { background: var(--accent); color: var(--bg); font-weight: 600; }
 
-  /* Tabs */
-  .tabs { display: flex; gap: 4px; margin-bottom: 16px; background: var(--bg); padding: 4px; border-radius: 4px; width: fit-content; border: 1px solid var(--border); flex-wrap: wrap; }
-  .tab { padding: 6px 16px; border-radius: 3px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; background: none; border: none; color: var(--muted); font-family: var(--font-mono); transition: background .15s, color .15s; }
-  .tab.active { background: var(--accent); color: var(--bg); font-weight: 600; }
-
-  /* Compare modal */
-  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; animation: fadeIn .2s; }
-  @keyframes fadeIn { from{opacity:0} to{opacity:1} }
-  .modal { background: var(--surface); border: 1px solid var(--border2); border-radius: 8px; max-width: 900px; width: 100%; max-height: 90vh; overflow-y: auto; padding: 32px; }
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .modal { background: var(--surface); border: 1px solid var(--border2); border-radius: 8px; max-width: 600px; width: 100%; max-height: 90vh; overflow-y: auto; padding: 32px; }
   .modal-close { float: right; background: none; border: none; color: var(--muted); font-size: 24px; cursor: pointer; line-height: 1; }
-  .modal-close:hover { color: var(--text); }
-  .modal-title { font-family: var(--font-display); font-size: 22px; font-weight: 700; margin-bottom: 24px; }
-  .compare-rank { color: var(--muted); font-size: 11px; width: 28px; text-align: right; }
-  .compare-name { display: flex; align-items: center; gap: 10px; }
-  .compare-name img { width: 24px; height: 24px; border-radius: 50%; }
-  .compare-row-me { background: rgba(0,229,160,.06); }
-  .compare-row-me td:first-child::before { content: '★ '; color: var(--accent); }
+  .modal-title { font-family: var(--font-display); font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+  .modal-subtitle { font-size: 12px; color: var(--muted); margin-bottom: 24px; line-height: 1.6; }
+
+  .channel-tabs { display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+  .channel-tab { padding: 12px 20px; cursor: pointer; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); background: none; border: none; border-bottom: 2px solid transparent; font-family: var(--font-mono); transition: all .2s; display: flex; align-items: center; gap: 8px; }
+  .channel-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .channel-tab.disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .form-group { margin-bottom: 20px; }
+  .form-label { display: block; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+  .form-input { width: 100%; background: var(--bg); border: 1px solid var(--border2); border-radius: 4px; padding: 12px 14px; color: var(--text); font-family: var(--font-mono); font-size: 12px; outline: none; transition: border-color .2s; }
+  .form-input:focus { border-color: var(--accent); }
+  .form-help { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.6; }
+  .form-help a { color: var(--accent2); text-decoration: none; }
+
+  .checkbox-group { display: flex; flex-direction: column; gap: 12px; }
+  .checkbox-item { display: flex; align-items: flex-start; gap: 12px; cursor: pointer; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; transition: border-color .15s; }
+  .checkbox-item:hover { border-color: var(--accent); }
+  .checkbox-item input { margin-top: 2px; accent-color: var(--accent); cursor: pointer; }
+  .checkbox-item .ck-text { flex: 1; }
+  .checkbox-item .ck-title { font-size: 13px; font-weight: 600; color: var(--text); }
+  .checkbox-item .ck-desc { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+
+  .code-display { background: var(--bg); border: 2px solid var(--accent); border-radius: 4px; padding: 24px; text-align: center; margin: 20px 0; }
+  .code-display .code { font-family: var(--font-mono); font-size: 36px; font-weight: 700; color: var(--accent); letter-spacing: 12px; }
+  .code-display .code-help { font-size: 11px; color: var(--muted); margin-top: 12px; line-height: 1.6; }
+
+  .sub-item { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; margin-bottom: 8px; }
+  .sub-channel-icon { font-size: 20px; }
+  .sub-info { flex: 1; min-width: 0; }
+  .sub-title { font-size: 12px; color: var(--text); }
+  .sub-meta { font-size: 10px; color: var(--muted); margin-top: 3px; word-break: break-all; }
 
   @media (max-width: 640px) {
     .row { flex-direction: column; }
@@ -155,11 +166,22 @@
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useCallback, useRef } = React;
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── Config ──────────────────────────────────────────────────────────────────
 const API_BASE = "https://livepeer-network-api.cloudspe.com/api/v1";
 const POLL_INTERVAL = 60_000;
 
-// ─── API client ──────────────────────────────────────────────────────────────
+// Each browser gets a permanent UUID on first load - used to scope subscriptions
+function getOrCreateClientId() {
+  let cid = localStorage.getItem("lw_client_id");
+  if (!cid) {
+    cid = crypto.randomUUID();
+    localStorage.setItem("lw_client_id", cid);
+  }
+  return cid;
+}
+const CLIENT_ID = getOrCreateClientId();
+
+// ─── API clients ─────────────────────────────────────────────────────────────
 async function api(path, params = {}) {
   const qs = Object.entries(params)
     .filter(([_, v]) => v !== undefined && v !== null && v !== "")
@@ -168,20 +190,37 @@ async function api(path, params = {}) {
   const url = `${API_BASE}${path}${qs ? "?" + qs : ""}`;
   const res = await fetch(url);
   if (!res.ok) {
-    let body = "";
-    try { body = (await res.json())?.error?.message || ""; } catch {}
+    let body = ""; try { body = (await res.json())?.error?.message || ""; } catch {}
     throw new Error(`API ${res.status}: ${path}${body ? " — " + body : ""}`);
   }
   return res.json();
 }
 
-// ─── Formatting helpers ──────────────────────────────────────────────────────
+function getBackend() { return localStorage.getItem("lw_backend") || ""; }
+
+async function backend(path, opts = {}) {
+  const base = getBackend();
+  if (!base) throw new Error("Backend URL not configured. Click ⚙ Settings to add it.");
+  const res = await fetch(`${base}${path}`, {
+    ...opts,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Client-Id": CLIENT_ID,
+      ...(opts.headers || {}),
+    },
+  });
+  if (!res.ok) {
+    let body = ""; try { body = (await res.json())?.error || ""; } catch {}
+    throw new Error(`Backend ${res.status}: ${body || path}`);
+  }
+  return res.json();
+}
+
+// ─── Formatting ──────────────────────────────────────────────────────────────
 function lpt(val) {
   if (val == null) return "—";
   const n = Number(val);
   if (n === 0) return "0.0000 LPT";
-  // API returns LPT amounts as decimal strings already scaled to LPT (not wei)
-  // Check if number is > 1e15, likely raw wei
   if (n > 1e15) return (n / 1e18).toFixed(4) + " LPT";
   return n.toFixed(4) + " LPT";
 }
@@ -196,132 +235,61 @@ function usd(val) {
   if (val == null) return "—";
   return "$" + Number(val).toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
-function pct(val) {
-  if (val == null) return "—";
-  return Number(val).toFixed(2) + "%";
-}
-function shortAddr(addr) {
-  if (!addr) return "";
-  return addr.slice(0, 6) + "…" + addr.slice(-4);
-}
-function fmtDate(iso) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString();
-}
-function fmtDateTime(iso) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString();
-}
+function pct(val) { return val == null ? "—" : Number(val).toFixed(2) + "%"; }
+function shortAddr(addr) { return addr ? addr.slice(0, 6) + "…" + addr.slice(-4) : ""; }
+function fmtDate(iso) { return iso ? new Date(iso).toLocaleDateString() : "—"; }
 
-// ─── LocalStorage helpers ────────────────────────────────────────────────────
-const STORAGE = {
-  getWallets: () => {
-    try { return JSON.parse(localStorage.getItem("lw_wallets") || "[]"); }
-    catch { return []; }
-  },
+// ─── Storage ─────────────────────────────────────────────────────────────────
+const S = {
+  getWallets: () => { try { return JSON.parse(localStorage.getItem("lw_wallets") || "[]"); } catch { return []; } },
   setWallets: (w) => localStorage.setItem("lw_wallets", JSON.stringify(w)),
   getActive: () => localStorage.getItem("lw_active") || "",
   setActive: (a) => localStorage.setItem("lw_active", a),
-  getAlertSnapshot: (addr) => {
-    try { return JSON.parse(localStorage.getItem(`lw_snap_${addr}`) || "null"); }
-    catch { return null; }
-  },
-  setAlertSnapshot: (addr, snap) => localStorage.setItem(`lw_snap_${addr}`, JSON.stringify(snap)),
-  notifEnabled: () => localStorage.getItem("lw_notif") === "1",
-  setNotifEnabled: (v) => localStorage.setItem("lw_notif", v ? "1" : "0"),
+  setBackend: (u) => localStorage.setItem("lw_backend", u),
+  getSnap: (addr) => { try { return JSON.parse(localStorage.getItem(`lw_snap_${addr}`) || "null"); } catch { return null; } },
+  setSnap: (addr, snap) => localStorage.setItem(`lw_snap_${addr}`, JSON.stringify(snap)),
+  getLinked: () => { try { return JSON.parse(localStorage.getItem("lw_tg_linked") || "null"); } catch { return null; } },
+  setLinked: (data) => localStorage.setItem("lw_tg_linked", JSON.stringify(data)),
 };
-
-// ─── Notifications ───────────────────────────────────────────────────────────
-async function requestNotificationPermission() {
-  if (!("Notification" in window)) return false;
-  if (Notification.permission === "granted") return true;
-  if (Notification.permission === "denied") return false;
-  const result = await Notification.requestPermission();
-  return result === "granted";
-}
-function showNotification(title, body) {
-  if (!("Notification" in window) || Notification.permission !== "granted") return;
-  try { new Notification(title, { body, icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%2300e5a0'/></svg>" }); }
-  catch (e) { console.warn("notify failed", e); }
-}
-
-// ─── CSV download ────────────────────────────────────────────────────────────
-async function downloadCsv(filename, url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`CSV download failed: ${res.status}`);
-  const blob = await res.blob();
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-}
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 function App() {
-  const [wallets, setWallets]       = useState(STORAGE.getWallets());
-  const [activeAddr, setActiveAddr] = useState(STORAGE.getActive());
+  const [wallets, setWallets] = useState(S.getWallets());
+  const [activeAddr, setActiveAddr] = useState(S.getActive());
   const [walletInput, setWalletInput] = useState("");
-  const [loading, setLoading]       = useState(false);
-  const [error, setError]           = useState(null);
-  const [delegator, setDelegator]   = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+  const [delegator, setDelegator] = useState(null);
   const [orchestrator, setOrchestrator] = useState(null);
   const [cutsHistory, setCutsHistory] = useState([]);
   const [stakeHistory, setStakeHistory] = useState([]);
-  const [netEcon, setNetEcon]       = useState(null);
+  const [netEcon, setNetEcon] = useState(null);
   const [networkStats, setNetworkStats] = useState(null);
-  const [alerts, setAlerts]         = useState([]);
-  const [lastPoll, setLastPoll]     = useState(null);
-  const [progress, setProgress]     = useState("");
-  const [notifEnabled, setNotifEnabled] = useState(STORAGE.notifEnabled());
-  const [showCompare, setShowCompare] = useState(false);
-  const [topOrchs, setTopOrchs]     = useState([]);
-  const [loadingCompare, setLoadingCompare] = useState(false);
-
-  const detectChanges = (addr, prevCuts, nextCuts) => {
-    const newAlerts = [];
-    if (!prevCuts || !nextCuts || prevCuts.length === 0 || nextCuts.length === 0) return newAlerts;
-    const prevTop = prevCuts[0];
-    const nextTop = nextCuts[0];
-    if (prevTop.event_id === nextTop.event_id) return newAlerts;
-    // New cut change detected
-    const rcChanged = prevTop.reward_cut_percent !== nextTop.reward_cut_percent;
-    const fcChanged = prevTop.fee_cut_percent !== nextTop.fee_cut_percent;
-    if (rcChanged) {
-      const up = Number(nextTop.reward_cut_percent) > Number(prevTop.reward_cut_percent);
-      const msg = `Reward cut ${up?"↑ increased":"↓ decreased"}: ${pct(prevTop.reward_cut_percent)} → ${pct(nextTop.reward_cut_percent)}`;
-      newAlerts.push({ id: Date.now()+1, type: up?"warn":"good", icon: up?"⚠️":"✅", msg, time: new Date().toLocaleTimeString(), addr });
-      if (notifEnabled) showNotification("Reward cut changed", `${shortAddr(addr)}: ${msg}`);
-    }
-    if (fcChanged) {
-      const up = Number(nextTop.fee_cut_percent) > Number(prevTop.fee_cut_percent);
-      const msg = `Fee cut ${up?"↑ increased":"↓ decreased"}: ${pct(prevTop.fee_cut_percent)} → ${pct(nextTop.fee_cut_percent)}`;
-      newAlerts.push({ id: Date.now()+2, type: up?"warn":"good", icon: up?"⚠️":"✅", msg, time: new Date().toLocaleTimeString(), addr });
-      if (notifEnabled) showNotification("Fee cut changed", `${shortAddr(addr)}: ${msg}`);
-    }
-    return newAlerts;
-  };
+  const [alerts, setAlerts] = useState([]);
+  const [lastPoll, setLastPoll] = useState(null);
+  const [progress, setProgress] = useState("");
+  const [econView, setEconView] = useState("orchestrator");
+  const [showNotifs, setShowNotifs] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [subscriptions, setSubscriptions] = useState([]);
 
   const fetchAll = useCallback(async (addr) => {
     if (!addr) return;
-    setLoading(true);
-    setError(null);
+    setLoading(true); setError(null);
     try {
-      setProgress("Loading delegator portfolio…");
+      setProgress("Loading delegator…");
       const del = await api(`/delegators/${addr}`);
       setDelegator(del);
 
       if (!del.delegations || del.delegations.length === 0) {
         setError("Delegator has no active delegations.");
-        setOrchestrator(null); setCutsHistory([]); setStakeHistory([]); setNetEcon(null);
+        setOrchestrator(null);
         return;
       }
-
       const orchAddr = del.delegations[0].delegate_address;
 
-      setProgress("Loading orchestrator data…");
+      setProgress("Loading orchestrator…");
       const [orch, cuts, stakeHist, netE, netStats] = await Promise.all([
         api(`/orchestrators/${orchAddr}`),
         api(`/orchestrators/${orchAddr}/cuts-history`),
@@ -330,14 +298,27 @@ function App() {
         api(`/network/stats`).catch(() => null),
       ]);
 
-      // Detect changes vs previous snapshot
-      const prevSnap = STORAGE.getAlertSnapshot(addr);
+      const prevSnap = S.getSnap(addr);
       const cutsData = cuts.data || [];
-      if (prevSnap?.cuts) {
-        const newAlerts = detectChanges(addr, prevSnap.cuts, cutsData);
-        if (newAlerts.length) setAlerts(p => [...newAlerts, ...p].slice(0, 30));
+      const localAlerts = [];
+      if (prevSnap?.cuts && cutsData.length > 0 && prevSnap.cuts.length > 0) {
+        if (cutsData[0].event_id !== prevSnap.cuts[0].event_id) {
+          if (cutsData[0].reward_cut_percent !== prevSnap.cuts[0].reward_cut_percent) {
+            const up = Number(cutsData[0].reward_cut_percent) > Number(prevSnap.cuts[0].reward_cut_percent);
+            localAlerts.push({ id: Date.now()+1, type: up?"warn":"good", icon: up?"⚠️":"✅",
+              msg: `Reward cut ${up?"↑":"↓"}: ${pct(prevSnap.cuts[0].reward_cut_percent)} → ${pct(cutsData[0].reward_cut_percent)}`,
+              time: new Date().toLocaleTimeString() });
+          }
+          if (cutsData[0].fee_cut_percent !== prevSnap.cuts[0].fee_cut_percent) {
+            const up = Number(cutsData[0].fee_cut_percent) > Number(prevSnap.cuts[0].fee_cut_percent);
+            localAlerts.push({ id: Date.now()+2, type: up?"warn":"good", icon: up?"⚠️":"✅",
+              msg: `Fee cut ${up?"↑":"↓"}: ${pct(prevSnap.cuts[0].fee_cut_percent)} → ${pct(cutsData[0].fee_cut_percent)}`,
+              time: new Date().toLocaleTimeString() });
+          }
+        }
       }
-      STORAGE.setAlertSnapshot(addr, { cuts: cutsData });
+      if (localAlerts.length) setAlerts(p => [...localAlerts, ...p].slice(0, 30));
+      S.setSnap(addr, { cuts: cutsData });
 
       setOrchestrator(orch);
       setCutsHistory(cutsData);
@@ -345,13 +326,9 @@ function App() {
       setNetEcon(netE);
       setNetworkStats(netStats);
       setLastPoll(new Date());
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-      setProgress("");
-    }
-  }, [notifEnabled]);
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); setProgress(""); }
+  }, []);
 
   useEffect(() => {
     if (!activeAddr) return;
@@ -360,92 +337,57 @@ function App() {
     return () => clearInterval(id);
   }, [activeAddr, fetchAll]);
 
+  // Load this client's subscriptions
+  useEffect(() => {
+    if (!getBackend()) { setSubscriptions([]); return; }
+    backend(`/subscriptions?client_id=${CLIENT_ID}`)
+      .then(r => setSubscriptions(r.subscriptions || []))
+      .catch(() => setSubscriptions([]));
+  }, [showNotifs]);
+
   const addWallet = () => {
     const t = walletInput.trim().toLowerCase();
-    if (!/^0x[a-f0-9]{40}$/.test(t)) {
-      setError("Invalid Ethereum address. Must be 0x + 40 hex characters.");
-      return;
-    }
+    if (!/^0x[a-f0-9]{40}$/.test(t)) { setError("Invalid Ethereum address."); return; }
     setError(null);
     if (!wallets.includes(t)) {
       const updated = [...wallets, t];
-      setWallets(updated);
-      STORAGE.setWallets(updated);
+      setWallets(updated); S.setWallets(updated);
     }
-    STORAGE.setActive(t);
-    setActiveAddr(t);
-    setWalletInput("");
-    setAlerts([]);
+    S.setActive(t); setActiveAddr(t); setWalletInput(""); setAlerts([]);
   };
-
-  const switchWallet = (addr) => {
-    STORAGE.setActive(addr);
-    setActiveAddr(addr);
-    setAlerts([]);
-  };
-
+  const switchWallet = (addr) => { S.setActive(addr); setActiveAddr(addr); setAlerts([]); };
   const removeWallet = (addr, e) => {
     e.stopPropagation();
     const updated = wallets.filter(w => w !== addr);
-    setWallets(updated);
-    STORAGE.setWallets(updated);
+    setWallets(updated); S.setWallets(updated);
     localStorage.removeItem(`lw_snap_${addr}`);
     if (activeAddr === addr) {
       const next = updated[0] || "";
-      STORAGE.setActive(next);
-      setActiveAddr(next);
+      S.setActive(next); setActiveAddr(next);
       if (!next) { setDelegator(null); setOrchestrator(null); }
     }
   };
 
-  const toggleNotifications = async () => {
-    if (notifEnabled) {
-      STORAGE.setNotifEnabled(false);
-      setNotifEnabled(false);
-    } else {
-      const ok = await requestNotificationPermission();
-      if (ok) {
-        STORAGE.setNotifEnabled(true);
-        setNotifEnabled(true);
-        showNotification("LiveWatch notifications enabled", "You'll be notified when reward/fee cuts change.");
-      } else {
-        setError("Browser denied notification permission. Enable it in your browser settings.");
-      }
-    }
-  };
-
-  const exportRewardsCsv = async () => {
-    if (!orchestrator) return;
-    const end = new Date().toISOString().slice(0,10);
-    const startD = new Date(); startD.setDate(startD.getDate() - 365);
-    const start = startD.toISOString().slice(0,10);
-    const url = `${API_BASE}/reports/rewards.csv?orchestrator=${orchestrator.address}&start=${start}&end=${end}`;
-    try {
-      await downloadCsv(`livepeer-rewards-${orchestrator.address.slice(0,8)}-${start}-to-${end}.csv`, url);
-    } catch (e) { setError(`CSV export failed: ${e.message}`); }
-  };
-
-  const openCompare = async () => {
-    setShowCompare(true);
-    if (topOrchs.length > 0) return;
-    setLoadingCompare(true);
-    try {
-      const res = await api(`/orchestrators`, { active_only: true, limit: 100 });
-      setTopOrchs(res.data || []);
-    } catch (e) {
-      setError(`Compare failed: ${e.message}`);
-      setShowCompare(false);
-    } finally {
-      setLoadingCompare(false);
-    }
-  };
-
-  // Find the current orchestrator's rank
-  const myOrchRank = orchestrator && topOrchs.length
-    ? topOrchs.findIndex(o => o.address.toLowerCase() === orchestrator.address.toLowerCase()) + 1
-    : 0;
-
   const myDelegation = delegator?.delegations?.[0];
+  const computeDelegatorEcon = () => {
+    if (!netEcon || !orchestrator || !myDelegation) return null;
+    const myStake = Number(myDelegation.bonded_principal);
+    const totalStake = Number(orchestrator.total_stake);
+    if (!totalStake || totalStake === 0) return null;
+    const myShare = myStake / totalStake;
+    const rewardCut = Number(orchestrator.reward_cut_percent) / 100;
+    const feeCut = Number(orchestrator.fee_cut_percent) / 100;
+    const myRewards = Number(netEcon.gross_rewards_usd) * (1 - rewardCut) * myShare;
+    const myPayouts = Number(netEcon.gross_payouts_usd) * (1 - feeCut) * myShare;
+    return {
+      gross_rewards_usd: myRewards.toString(),
+      gross_payouts_usd: myPayouts.toString(),
+      gross_total_usd: (myRewards + myPayouts).toString(),
+      gas_cost_native_eth: "0",
+      period_days: netEcon.period_days,
+    };
+  };
+  const econToShow = econView === "delegator" ? computeDelegatorEcon() : netEcon;
 
   return (
     <div className="app">
@@ -456,19 +398,14 @@ function App() {
         </div>
         <div className="live-dot">
           <span className="dot" />
-          <span>{loading && progress
-            ? progress
-            : lastPoll ? `Last sync ${lastPoll.toLocaleTimeString()}` : "Awaiting data"}</span>
+          <span>{loading && progress ? progress : lastPoll ? `Last sync ${lastPoll.toLocaleTimeString()}` : "Awaiting data"}</span>
         </div>
       </header>
 
-      {/* Saved wallets */}
       {wallets.length > 0 && (
         <div className="wallets-bar">
           {wallets.map(w => (
-            <div key={w}
-                 className={`wallet-chip ${w === activeAddr ? "active" : ""}`}
-                 onClick={() => switchWallet(w)}>
+            <div key={w} className={`wallet-chip ${w === activeAddr ? "active" : ""}`} onClick={() => switchWallet(w)}>
               <span>{shortAddr(w)}</span>
               <span className="x" onClick={(e) => removeWallet(w, e)}>✕</span>
             </div>
@@ -477,43 +414,30 @@ function App() {
       )}
 
       <div className="search-wrap">
-        <input
-          className="search-input"
-          placeholder="Add delegator wallet (0x…)"
-          value={walletInput}
-          onChange={e => setWalletInput(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && addWallet()}
-        />
+        <input className="search-input" placeholder="Add delegator wallet (0x…)" value={walletInput}
+          onChange={e => setWalletInput(e.target.value)} onKeyDown={e => e.key === "Enter" && addWallet()} />
         <button className="btn" onClick={addWallet} disabled={loading}>
           {loading ? <><span className="spinner" />Sync</> : "Add"}
         </button>
       </div>
 
       <div className="controls-bar">
-        <button className="btn-ghost" onClick={toggleNotifications}>
-          {notifEnabled ? "🔔 Notifications ON" : "🔕 Enable Notifications"}
+        <button className="btn-ghost" onClick={() => setShowNotifs(true)} disabled={!activeAddr}>
+          🔔 Notifications {subscriptions.length > 0 ? `(${subscriptions.length})` : ""}
         </button>
-        {orchestrator && (
-          <>
-            <button className="btn-ghost" onClick={exportRewardsCsv}>
-              📥 Export Rewards CSV
-            </button>
-            <button className="btn-ghost" onClick={openCompare}>
-              📊 Compare Orchestrators
-            </button>
-          </>
-        )}
+        <button className="btn-ghost" onClick={() => setShowSettings(true)}>⚙ Settings</button>
       </div>
 
       {error && <div className="error-msg">⚠ {error}</div>}
+      {success && <div className="error-msg" style={{background:"rgba(0,229,160,.1)",borderColor:"rgba(0,229,160,.3)",color:"var(--accent)"}}>✓ {success}</div>}
 
       {!delegator && !loading && !error && (
         <div className="empty">
           <h2>{wallets.length === 0 ? "Add your first delegator address" : "Select a wallet above"}</h2>
           <p>
-            Track multiple Livepeer delegator wallets,<br />
-            get notified when orchestrators change reward cuts,<br />
-            export reward history, and compare to other orchestrators.<br /><br />
+            Track Livepeer delegator wallets,<br />
+            get notified on Telegram when orchestrators change reward cuts,<br />
+            miss rewards, or change fees.<br /><br />
             <span style={{color:"var(--accent)"}}>Powered by Livepeer Valuation API</span>
           </p>
         </div>
@@ -521,79 +445,41 @@ function App() {
 
       {delegator && orchestrator && (
         <>
-          {/* Orchestrator profile header */}
           <div className="orch-header">
-            {orchestrator.avatar_url
-              ? <img className="orch-avatar" src={orchestrator.avatar_url} alt="" />
-              : <div className="orch-avatar" />}
+            {orchestrator.avatar_url ? <img className="orch-avatar" src={orchestrator.avatar_url} alt="" /> : <div className="orch-avatar" />}
             <div className="orch-info">
-              <div className="orch-name">
-                {orchestrator.display_name || shortAddr(orchestrator.address)}
-              </div>
+              <div className="orch-name">{orchestrator.display_name || shortAddr(orchestrator.address)}</div>
               <div className="orch-addr">{orchestrator.address}</div>
             </div>
             {orchestrator.is_active && <span className="badge badge-active">Active</span>}
           </div>
 
-          {/* Alerts */}
           <div className="card">
-            <div className="card-title">
-              <span>Alerts ({alerts.length})</span>
-              {alerts.length > 0 && (
-                <button className="btn-ghost" onClick={() => setAlerts([])}>Clear all</button>
-              )}
+            <div className="card-title"><span>Alerts ({alerts.length})</span>
+              {alerts.length > 0 && <button className="btn-ghost" onClick={() => setAlerts([])}>Clear all</button>}
             </div>
             <div className="alerts-list">
-              {alerts.length === 0
-                ? <div className="no-alerts">No alerts since last sync — parameters unchanged</div>
+              {alerts.length === 0 ? <div className="no-alerts">No alerts since last sync</div>
                 : alerts.map(a => (
                   <div key={a.id} className={`alert-item ${a.type}`}>
                     <span className="alert-icon">{a.icon}</span>
-                    <div className="alert-body">
-                      <div className="alert-msg">{a.msg}</div>
-                      <div className="alert-time">{a.time}{a.addr ? ` · ${shortAddr(a.addr)}` : ""}</div>
-                    </div>
+                    <div className="alert-body"><div className="alert-msg">{a.msg}</div><div className="alert-time">{a.time}</div></div>
                     <button className="alert-dismiss" onClick={() => setAlerts(p => p.filter(x => x.id !== a.id))}>✕</button>
                   </div>
-                ))
-              }
+                ))}
             </div>
           </div>
 
-          {/* Delegator overview */}
           <div className="card">
             <div className="card-title">Your Position</div>
             <div className="stats-grid">
-              <div className="stat">
-                <div className="stat-label">Bonded Principal</div>
-                <div className="stat-value accent">{lpt(myDelegation?.bonded_principal)}</div>
-              </div>
-              <div className="stat">
-                <div className="stat-label">Pending Stake</div>
-                <div className="stat-value">{lpt(myDelegation?.pending_stake)}</div>
-              </div>
-              <div className="stat">
-                <div className="stat-label">Pending Fees</div>
-                <div className="stat-value accent2">{eth(myDelegation?.pending_fees)}</div>
-              </div>
-              <div className="stat">
-                <div className="stat-label">First Bond</div>
-                <div className="stat-value" style={{fontSize:14}}>Block {delegator.first_bond_block || "—"}</div>
-              </div>
-              <div className="stat">
-                <div className="stat-label">Last Seen</div>
-                <div className="stat-value" style={{fontSize:14}}>Block {delegator.last_seen_block || "—"}</div>
-              </div>
-              <div className="stat">
-                <div className="stat-label">Status</div>
-                <div className="stat-value" style={{fontSize:14, color: delegator.is_active ? "var(--accent)" : "var(--muted)"}}>
-                  {delegator.is_active ? "Active ✓" : "Inactive"}
-                </div>
-              </div>
+              <div className="stat"><div className="stat-label">Bonded</div><div className="stat-value accent">{lpt(myDelegation?.bonded_principal)}</div></div>
+              <div className="stat"><div className="stat-label">Pending Stake</div><div className="stat-value">{lpt(myDelegation?.pending_stake)}</div></div>
+              <div className="stat"><div className="stat-label">Pending Fees</div><div className="stat-value accent2">{eth(myDelegation?.pending_fees)}</div></div>
+              <div className="stat"><div className="stat-label">Status</div><div className="stat-value" style={{fontSize:14, color: delegator.is_active ? "var(--accent)" : "var(--muted)"}}>{delegator.is_active ? "Active ✓" : "Inactive"}</div></div>
             </div>
           </div>
 
-          {/* Orchestrator current params */}
           <div className="row">
             <div className="card">
               <div className="card-title">Reward Cut</div>
@@ -612,43 +498,56 @@ function App() {
             </div>
           </div>
 
-          {/* 30-day net economics */}
           {netEcon && (
             <div className="card">
-              <div className="card-title">30-Day Net Economics (Orchestrator)</div>
-              <div className="stats-grid">
-                <div className="stat">
-                  <div className="stat-label">Gross Payouts</div>
-                  <div className="stat-value accent">{usd(netEcon.gross_payouts_usd)}</div>
-                  <div className="stat-sub">From transcoding tickets</div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Gross Rewards</div>
-                  <div className="stat-value accent2">{usd(netEcon.gross_rewards_usd)}</div>
-                  <div className="stat-sub">From inflation</div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Gas Cost</div>
-                  <div className="stat-value warn">{eth(netEcon.gas_cost_native_eth)}</div>
-                  <div className="stat-sub">Tx fees paid (ETH)</div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Gross Total</div>
-                  <div className="stat-value">{usd(netEcon.gross_total_usd)}</div>
-                  <div className="stat-sub">Payouts + rewards (USD)</div>
+              <div className="card-title">
+                <span>30-Day Net Economics</span>
+                <div className="toggle-group">
+                  <button className={`toggle-opt ${econView === "orchestrator" ? "active" : ""}`} onClick={() => setEconView("orchestrator")}>Orchestrator</button>
+                  <button className={`toggle-opt ${econView === "delegator" ? "active" : ""}`} onClick={() => setEconView("delegator")}>Delegator (You)</button>
                 </div>
               </div>
+              {econToShow ? (
+                <div className="stats-grid">
+                  <div className="stat">
+                    <div className="stat-label">{econView === "orchestrator" ? "Gross Payouts" : "Your Payout Share"}</div>
+                    <div className="stat-value accent">{usd(econToShow.gross_payouts_usd)}</div>
+                    <div className="stat-sub">From transcoding tickets</div>
+                  </div>
+                  <div className="stat">
+                    <div className="stat-label">{econView === "orchestrator" ? "Gross Rewards" : "Your Reward Share"}</div>
+                    <div className="stat-value accent2">{usd(econToShow.gross_rewards_usd)}</div>
+                    <div className="stat-sub">From inflation</div>
+                  </div>
+                  {econView === "orchestrator" && (
+                    <div className="stat">
+                      <div className="stat-label">Gas Cost</div>
+                      <div className="stat-value warn">{eth(econToShow.gas_cost_native_eth)}</div>
+                      <div className="stat-sub">Tx fees paid (ETH)</div>
+                    </div>
+                  )}
+                  <div className="stat">
+                    <div className="stat-label">{econView === "orchestrator" ? "Gross Total" : "Your Total"}</div>
+                    <div className="stat-value">{usd(econToShow.gross_total_usd)}</div>
+                    <div className="stat-sub">Payouts + rewards (USD)</div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{color:"var(--muted)",fontSize:12,padding:16}}>Cannot compute delegator share — missing stake data.</div>
+              )}
+              {econView === "delegator" && (
+                <div style={{fontSize:10,color:"var(--muted)",marginTop:8}}>
+                  Estimated as (your bonded / total stake) × gross × (1 − cut). Excludes pending/unclaimed amounts.
+                </div>
+              )}
             </div>
           )}
 
-          {/* Cuts history */}
           <div className="card">
-            <div className="card-title">Cut Change History (TranscoderUpdate events)</div>
+            <div className="card-title">Cut Change History</div>
             <div className="table-wrap">
               <table>
-                <thead>
-                  <tr><th>Date</th><th>Reward Cut</th><th>Fee Cut</th><th>Fee Share</th><th>Block</th></tr>
-                </thead>
+                <thead><tr><th>Date</th><th>Reward Cut</th><th>Fee Cut</th><th>Fee Share</th><th>Block</th></tr></thead>
                 <tbody>
                   {cutsHistory.length === 0
                     ? <tr><td colSpan={5} style={{textAlign:"center",color:"var(--muted)",padding:24}}>No cut changes on record</td></tr>
@@ -663,121 +562,222 @@ function App() {
                             <td className={fcChanged ? "changed-rc" : ""}>{pct(c.fee_cut_percent)}</td>
                             <td>{pct(c.fee_share_percent)}</td>
                             <td className="td-mono">{c.block_number}</td>
-                          </tr>
-                        );
-                      })
-                  }
+                          </tr>);
+                      })}
                 </tbody>
               </table>
             </div>
-            <div style={{marginTop:12,fontSize:10,color:"var(--muted)"}}>▲ = changed from previous event</div>
           </div>
 
-          {/* Stake history */}
-          {stakeHistory.length > 0 && (
-            <div className="card">
-              <div className="card-title">Recent Round Stakes</div>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr><th>Round</th><th>Total Stake</th><th>Reward Cut</th><th>Fee Cut</th><th>Date</th></tr>
-                  </thead>
-                  <tbody>
-                    {stakeHistory.slice(0, 10).map(s => (
-                      <tr key={s.round}>
-                        <td className="td-mono">{s.round}</td>
-                        <td className="td-mono">{lpt(s.total_stake)}</td>
-                        <td>{pct(s.reward_cut_percent)}</td>
-                        <td>{pct(s.fee_cut_percent)}</td>
-                        <td>{fmtDate(s.block_timestamp)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* Network context */}
           {networkStats && (
             <div className="card">
               <div className="card-title">Network Context</div>
               <div className="stats-grid">
-                <div className="stat">
-                  <div className="stat-label">Active Orchs</div>
-                  <div className="stat-value">{networkStats.active_orchestrators}</div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Total LPT Staked</div>
-                  <div className="stat-value accent">{lpt(networkStats.total_lpt_staked)}</div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Payouts 24h</div>
-                  <div className="stat-value">{usd(networkStats.payouts_usd_24h)}</div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Rewards 24h</div>
-                  <div className="stat-value">{usd(networkStats.rewards_usd_24h)}</div>
-                </div>
+                <div className="stat"><div className="stat-label">Active Orchs</div><div className="stat-value">{networkStats.active_orchestrators}</div></div>
+                <div className="stat"><div className="stat-label">Total LPT Staked</div><div className="stat-value accent">{lpt(networkStats.total_lpt_staked)}</div></div>
+                <div className="stat"><div className="stat-label">Payouts 24h</div><div className="stat-value">{usd(networkStats.payouts_usd_24h)}</div></div>
+                <div className="stat"><div className="stat-label">Rewards 24h</div><div className="stat-value">{usd(networkStats.rewards_usd_24h)}</div></div>
               </div>
             </div>
           )}
 
           <div className="footer-note">
-            Data from livepeer-network-api.cloudspe.com<br />
-            Polling every 60s · {wallets.length} wallet{wallets.length !== 1 ? "s" : ""} tracked · Settings saved to your browser
+            Data: livepeer-network-api.cloudspe.com<br />
+            {getBackend() ? `Backend: ${new URL(getBackend()).hostname} (cron every 30m)` : "No backend configured — set one up in ⚙ Settings to enable Telegram notifications"}<br />
+            {wallets.length} wallet{wallets.length !== 1 ? "s" : ""} tracked · {subscriptions.length} subscription{subscriptions.length !== 1 ? "s" : ""}
           </div>
         </>
       )}
 
-      {/* Compare modal */}
-      {showCompare && (
-        <div className="modal-backdrop" onClick={() => setShowCompare(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowCompare(false)}>✕</button>
-            <div className="modal-title">Compare Active Orchestrators</div>
-            {loadingCompare && <div><span className="spinner" />Loading top 100…</div>}
-            {!loadingCompare && (
-              <>
-                {myOrchRank > 0 && (
-                  <div style={{marginBottom:16, fontSize:12, color:"var(--muted)"}}>
-                    Your orchestrator ranks <strong style={{color:"var(--accent)"}}>#{myOrchRank}</strong> of {topOrchs.length} active
+      {showSettings && (
+        <SettingsModal onClose={() => setShowSettings(false)} onSave={(url) => { S.setBackend(url); window.location.reload(); }} />
+      )}
+
+      {showNotifs && activeAddr && (
+        <NotificationsModal
+          wallet={activeAddr}
+          subscriptions={subscriptions}
+          onClose={() => setShowNotifs(false)}
+          onChange={() => backend(`/subscriptions?client_id=${CLIENT_ID}`).then(r => setSubscriptions(r.subscriptions || []))}
+          setError={setError}
+          setSuccess={setSuccess}
+        />
+      )}
+    </div>
+  );
+}
+
+function SettingsModal({ onClose, onSave }) {
+  const [url, setUrl] = useState(getBackend());
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="modal-title">Backend Settings</div>
+        <div className="modal-subtitle">Configure your Cloudflare Worker URL to enable Telegram notifications.</div>
+        <div className="form-group">
+          <label className="form-label">Worker URL</label>
+          <input className="form-input" placeholder="https://livewatch-backend.you.workers.dev" value={url} onChange={e => setUrl(e.target.value)} />
+          <div className="form-help">Deploy the worker.js file to Cloudflare Workers and paste your worker URL here. See README for deployment steps.</div>
+        </div>
+        <button className="btn" onClick={() => onSave(url.replace(/\/$/, ""))}>Save</button>
+      </div>
+    </div>
+  );
+}
+
+function NotificationsModal({ wallet, subscriptions, onClose, onChange, setError, setSuccess }) {
+  const [channel, setChannel] = useState("telegram");
+  const [notify, setNotify] = useState({ reward_cut: true, fee_cut: true, missed_reward: true });
+  const [tgCode, setTgCode] = useState(null);
+  const [tgBotName, setTgBotName] = useState(null);
+  const [tgChatId, setTgChatId] = useState(S.getLinked()?.chat_id || null);
+  const [tgUsername, setTgUsername] = useState(S.getLinked()?.username || null);
+  const [polling, setPolling] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const pollRef = useRef(null);
+
+  const startTelegramLink = async () => {
+    try {
+      setBusy(true);
+      const res = await backend("/telegram/link", { method: "POST", body: "{}" });
+      setTgCode(res.code); setTgBotName(res.bot_username); setPolling(true);
+      pollRef.current = setInterval(async () => {
+        try {
+          const r = await backend(`/telegram/poll/${res.code}`);
+          if (r.linked) {
+            clearInterval(pollRef.current); setPolling(false);
+            setTgChatId(r.telegram_chat_id); setTgUsername(r.telegram_username);
+            S.setLinked({ chat_id: r.telegram_chat_id, username: r.telegram_username });
+            setSuccess("Telegram linked! Now select notification types and subscribe.");
+            setTimeout(() => setSuccess(null), 4000);
+          }
+        } catch {}
+      }, 2000);
+      setTimeout(() => { if (pollRef.current) { clearInterval(pollRef.current); setPolling(false); } }, 600_000);
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  const createSub = async () => {
+    if (!notify.reward_cut && !notify.fee_cut && !notify.missed_reward) {
+      setError("Select at least one notification type."); return;
+    }
+    try {
+      setBusy(true);
+      const body = {
+        client_id: CLIENT_ID,
+        wallet, channel,
+        notify_reward_cut: notify.reward_cut,
+        notify_fee_cut: notify.fee_cut,
+        notify_missed_reward: notify.missed_reward,
+        telegram_chat_id: tgChatId,
+      };
+      await backend("/subscriptions", { method: "POST", body: JSON.stringify(body) });
+      setSuccess("Subscription created! Check Telegram for confirmation.");
+      setTimeout(() => setSuccess(null), 4000);
+      onChange();
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const deleteSub = async (id) => {
+    try {
+      await backend(`/subscriptions/${id}`, { method: "DELETE" });
+      onChange();
+    } catch (e) { setError(e.message); }
+  };
+
+  const canSubmit = channel === "telegram" && !!tgChatId;
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="modal-title">Notifications</div>
+        <div className="modal-subtitle">Get notified when changes happen for <code style={{color:"var(--accent)"}}>{shortAddr(wallet)}</code>. Backend polls every 30 minutes.</div>
+
+        {subscriptions.length > 0 && (
+          <div className="form-group">
+            <label className="form-label">Your Active Subscriptions</label>
+            {subscriptions.map(s => (
+              <div className="sub-item" key={s.id}>
+                <span className="sub-channel-icon">📱</span>
+                <div className="sub-info">
+                  <div className="sub-title">
+                    {shortAddr(s.wallet)}
+                    {s.notify_reward_cut ? " · Reward cut" : ""}
+                    {s.notify_fee_cut ? " · Fee cut" : ""}
+                    {s.notify_missed_reward ? " · Missed reward" : ""}
                   </div>
-                )}
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr><th>#</th><th>Orchestrator</th><th>Stake</th><th>Reward Cut</th><th>Fee Cut</th></tr>
-                    </thead>
-                    <tbody>
-                      {topOrchs.map((o, i) => {
-                        const isMe = orchestrator && o.address.toLowerCase() === orchestrator.address.toLowerCase();
-                        return (
-                          <tr key={o.address} className={isMe ? "compare-row-me" : ""}>
-                            <td className="compare-rank">{i+1}</td>
-                            <td>
-                              <div className="compare-name">
-                                {o.avatar_url && <img src={o.avatar_url} alt="" />}
-                                <div>
-                                  <div style={{fontSize:12}}>{o.display_name || shortAddr(o.address)}</div>
-                                  {o.display_name && <div style={{fontSize:10,color:"var(--muted)"}}>{shortAddr(o.address)}</div>}
-                                </div>
-                              </div>
-                            </td>
-                            <td className="td-mono">{lpt(o.total_stake)}</td>
-                            <td>{pct(o.reward_cut_percent)}</td>
-                            <td>{pct(o.fee_cut_percent)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                  <div className="sub-meta">Telegram chat {s.telegram_chat_id}</div>
                 </div>
-              </>
-            )}
+                <button className="btn-ghost danger" onClick={() => deleteSub(s.id)}>✕ Remove</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="form-group">
+          <label className="form-label">Add Subscription for {shortAddr(wallet)}</label>
+          <div className="channel-tabs">
+            <button className={`channel-tab ${channel === "telegram" ? "active" : ""}`} onClick={() => setChannel("telegram")}>📱 Telegram</button>
+            <button className="channel-tab disabled" disabled>🎮 Discord <span className="badge badge-soon" style={{marginLeft:6}}>Soon</span></button>
+          </div>
+
+          {!tgChatId && !tgCode && (
+            <button className="btn" onClick={startTelegramLink} disabled={busy}>
+              {busy ? <><span className="spinner" />Starting…</> : "Link Telegram"}
+            </button>
+          )}
+          {tgCode && !tgChatId && (
+            <div className="code-display">
+              <div className="code">{tgCode}</div>
+              <div className="code-help">
+                Open Telegram → message <strong>@{tgBotName}</strong> → send this code<br />
+                {polling && <><span className="spinner" />Waiting for your message…</>}
+              </div>
+            </div>
+          )}
+          {tgChatId && (
+            <div style={{padding:12,background:"var(--bg)",border:"1px solid var(--accent)",borderRadius:4,fontSize:12,color:"var(--accent)"}}>
+              ✓ Linked to {tgUsername ? `@${tgUsername}` : `chat ${tgChatId}`}
+            </div>
+          )}
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Notify Me About</label>
+          <div className="checkbox-group">
+            <label className="checkbox-item">
+              <input type="checkbox" checked={notify.reward_cut} onChange={e => setNotify(n => ({ ...n, reward_cut: e.target.checked }))} />
+              <div className="ck-text">
+                <div className="ck-title">Reward cut changes</div>
+                <div className="ck-desc">When the orchestrator changes the % they keep from inflation rewards.</div>
+              </div>
+            </label>
+            <label className="checkbox-item">
+              <input type="checkbox" checked={notify.fee_cut} onChange={e => setNotify(n => ({ ...n, fee_cut: e.target.checked }))} />
+              <div className="ck-text">
+                <div className="ck-title">Fee cut changes</div>
+                <div className="ck-desc">When the orchestrator adjusts the % they keep from transcoding fees.</div>
+              </div>
+            </label>
+            <label className="checkbox-item">
+              <input type="checkbox" checked={notify.missed_reward} onChange={e => setNotify(n => ({ ...n, missed_reward: e.target.checked }))} />
+              <div className="ck-text">
+                <div className="ck-title">Reward not claimed</div>
+                <div className="ck-desc">When the orchestrator misses calling reward() — you lose inflation rewards for that round.</div>
+              </div>
+            </label>
           </div>
         </div>
-      )}
+
+        <button className="btn" onClick={createSub} disabled={!canSubmit || busy} style={{width:"100%"}}>
+          {busy ? <><span className="spinner" />Creating…</> : "Subscribe"}
+        </button>
+      </div>
     </div>
   );
 }
