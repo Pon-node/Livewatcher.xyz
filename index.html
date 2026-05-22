@@ -287,7 +287,16 @@ function App() {
         setOrchestrator(null);
         return;
       }
-      const orchAddr = del.delegations[0].delegate_address;
+      // API returns delegations sorted by bonded_principal DESC, but the largest
+      // historical bond isn't necessarily the current one. The current delegation
+      // is the one with the most recent as_of_block.
+      const activeDelegation = [...del.delegations].sort((a, b) =>
+        Number(b.as_of_block) - Number(a.as_of_block)
+      )[0];
+      // Store the chosen active delegation back into the delegator object so
+      // myDelegation can pick it up consistently.
+      del.activeDelegation = activeDelegation;
+      const orchAddr = activeDelegation.delegate_address;
 
       setProgress("Loading orchestrator…");
       const [orch, cuts, stakeHist, netE, netStats] = await Promise.all([
@@ -368,7 +377,7 @@ function App() {
     }
   };
 
-  const myDelegation = delegator?.delegations?.[0];
+  const myDelegation = delegator?.activeDelegation || delegator?.delegations?.[0];
   const computeDelegatorEcon = () => {
     if (!netEcon || !orchestrator || !myDelegation) return null;
     const myStake = Number(myDelegation.bonded_principal);
