@@ -203,6 +203,39 @@ async function api(path, params = {}) {
 
 function getBackend() { return "https://livewatch-backend.pon-node.workers.dev"; }
 
+// Livepeer contracts on Arbitrum One (from docs.livepeer.org)
+const TREASURY_ADDR = "0xf82C1FF415F1fCf582554fDba790E27019c8E8C4";
+const LPT_TOKEN_ADDR = "0x289ba1701C2F088cf0faf8B3705246331cB8A839";
+const ARB_RPCS = [
+  "https://arbitrum-one-rpc.publicnode.com",
+  "https://arbitrum.drpc.org",
+  "https://arb1.arbitrum.io/rpc",
+];
+
+// ERC20 balanceOf selector: 0x70a08231
+async function getLptBalance(address) {
+  const data = "0x70a08231" + address.toLowerCase().replace("0x", "").padStart(64, "0");
+  for (const rpcUrl of ARB_RPCS) {
+    try {
+      const res = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: 1, method: "eth_call",
+          params: [{ to: LPT_TOKEN_ADDR, data }, "latest"],
+        }),
+      });
+      if (!res.ok) continue;
+      const json = await res.json();
+      if (json.error || !json.result) continue;
+      // Convert hex to LPT (18 decimals)
+      const wei = BigInt(json.result);
+      return Number(wei) / 1e18;
+    } catch {}
+  }
+  throw new Error("All Arbitrum RPCs failed");
+}
+
 async function backend(path, opts = {}) {
   const base = getBackend();
   if (!base) throw new Error("Backend URL not configured. Click ⚙ Settings to add it.");
@@ -309,6 +342,21 @@ function App() {
   const [showNotifs, setShowNotifs] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [subscriptions, setSubscriptions] = useState([]);
+  const [cutsSort, setCutsSort] = useState("desc"); // 'asc' | 'desc'
+  const [roundsMap, setRoundsMap] = useState([]); // sorted array of {round, started_block}
+  const [treasuryLpt, setTreasuryLpt] = useState(null);
+  const [lptPriceUsd, setLptPriceUsd] = useState(null);
+
+  // Look up round number for a given block number using the rounds map
+  const blockToRound = (blockNumber) => {
+    if (!roundsMap.length || blockNumber == null) return null;
+    const bn = BigInt(blockNumber);
+    // roundsMap is sorted by round DESC (newest first). Find first round whose started_block <= bn.
+    for (const r of roundsMap) {
+      if (BigInt(r.started_block) <= bn) return r.round;
+    }
+    return null;
+  };
 
   const fetchAll = useCallback(async (addr) => {
     if (!addr) return;
@@ -335,13 +383,31 @@ function App() {
       const orchAddr = activeDelegation.delegate_address;
 
       setProgress("Loading orchestrator…");
-      const [orch, cuts, stakeHist, netE, netStats] = await Promise.all([
+      const [orch, cuts, stakeHist, netE, netStats, lptPriceRes] = await Promise.all([
         api(`/orchestrators/${orchAddr}`),
         api(`/orchestrators/${orchAddr}/cuts-history`),
         api(`/orchestrators/${orchAddr}/stake-history`),
         api(`/orchestrators/${orchAddr}/net-economics`, { period_days: 30 }),
         api(`/network/stats`).catch(() => null),
+        api(`/prices/LPT/USD/latest`).catch(() => null),
       ]);
+
+      // Build block→round map from stake-history (already has round + block_number pairs)
+      if (stakeHist?.data) {
+        const map = stakeHist.data
+          .map(s => ({ round: s.round, started_block: s.block_number }))
+          .sort((a, b) => Number(b.started_block) - Number(a.started_block));
+        setRoundsMap(map);
+      }
+
+      // Fetch treasury LPT balance (don't block — fire and forget)
+      getLptBalance(TREASURY_ADDR)
+        .then(bal => setTreasuryLpt(bal))
+        .catch(e => console.warn("Treasury balance fetch failed:", e.message));
+
+      if (lptPriceRes?.price) {
+        setLptPriceUsd(Number(lptPriceRes.price));
+      }
 
       const prevSnap = S.getSnap(addr);
       const cutsData = cuts.data || [];
@@ -599,23 +665,37 @@ function App() {
             <div className="card-title">Cut Change History</div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Date</th><th>Reward Cut</th><th>Fee Cut</th><th>Fee Share</th><th>Block</th></tr></thead>
+                <thead><tr>
+                  <th style={{cursor:"pointer", userSelect:"none"}} onClick={() => setCutsSort(s => s === "desc" ? "asc" : "desc")}>
+                    Date {cutsSort === "desc" ? "↓" : "↑"}
+                  </th>
+                  <th>Reward Cut</th><th>Fee Cut</th><th>Fee Share</th><th>Round</th>
+                </tr></thead>
                 <tbody>
                   {cutsHistory.length === 0
                     ? <tr><td colSpan={5} style={{textAlign:"center",color:"var(--muted)",padding:24}}>No cut changes on record</td></tr>
-                    : cutsHistory.slice(0, 15).map((c, i) => {
-                        const prev = cutsHistory[i+1];
-                        const rcChanged = prev && c.reward_cut_percent !== prev.reward_cut_percent;
-                        const fcChanged = prev && c.fee_cut_percent !== prev.fee_cut_percent;
-                        return (
-                          <tr key={c.event_id}>
-                            <td>{fmtDate(c.block_timestamp)}</td>
-                            <td className={rcChanged ? "changed-rc" : ""}>{pct(c.reward_cut_percent)}</td>
-                            <td className={fcChanged ? "changed-rc" : ""}>{pct(c.fee_cut_percent)}</td>
-                            <td>{pct(c.fee_share_percent)}</td>
-                            <td className="td-mono">{c.block_number}</td>
-                          </tr>);
-                      })}
+                    : (() => {
+                        // Always treat cutsHistory as DESC (newest first) for change-detection purposes
+                        const sortedForDisplay = cutsSort === "desc"
+                          ? cutsHistory.slice(0, 15)
+                          : cutsHistory.slice(0, 15).slice().reverse();
+                        return sortedForDisplay.map((c) => {
+                          // For change detection, always look at the chronologically-prior event in the original (desc) order
+                          const origIdx = cutsHistory.findIndex(x => x.event_id === c.event_id);
+                          const prev = cutsHistory[origIdx + 1];
+                          const rcChanged = prev && c.reward_cut_percent !== prev.reward_cut_percent;
+                          const fcChanged = prev && c.fee_cut_percent !== prev.fee_cut_percent;
+                          const round = blockToRound(c.block_number);
+                          return (
+                            <tr key={c.event_id}>
+                              <td>{fmtDate(c.block_timestamp)}</td>
+                              <td className={rcChanged ? "changed-rc" : ""}>{pct(c.reward_cut_percent)}</td>
+                              <td className={fcChanged ? "changed-rc" : ""}>{pct(c.fee_cut_percent)}</td>
+                              <td>{pct(c.fee_share_percent)}</td>
+                              <td className="td-mono">{round != null ? round : <span style={{color:"var(--muted)"}}>—</span>}</td>
+                            </tr>);
+                        });
+                      })()}
                 </tbody>
               </table>
             </div>
@@ -629,6 +709,15 @@ function App() {
                 <div className="stat"><div className="stat-label">Total LPT Staked</div><div className="stat-value accent">{lpt(networkStats.total_lpt_staked)}</div></div>
                 <div className="stat"><div className="stat-label">Payouts 24h</div><div className="stat-value">{usd(networkStats.payouts_usd_24h)}</div></div>
                 <div className="stat"><div className="stat-label">Rewards 24h</div><div className="stat-value">{usd(networkStats.rewards_usd_24h)}</div></div>
+                <div className="stat">
+                  <div className="stat-label">Treasury LPT</div>
+                  <div className="stat-value accent2">
+                    {treasuryLpt != null ? `${treasuryLpt.toFixed(2)} LPT` : <span style={{color:"var(--muted)",fontSize:14}}>Loading…</span>}
+                  </div>
+                  {treasuryLpt != null && lptPriceUsd != null && (
+                    <div className="stat-sub">~{usd(treasuryLpt * lptPriceUsd)}</div>
+                  )}
+                </div>
               </div>
             </div>
           )}
