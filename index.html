@@ -196,7 +196,7 @@ async function api(path, params = {}) {
   return res.json();
 }
 
-function getBackend() { return localStorage.getItem("lw_backend") || ""; }
+function getBackend() { return "https://livewatch-backend.pon-node.workers.dev"; }
 
 async function backend(path, opts = {}) {
   const base = getBackend();
@@ -425,7 +425,6 @@ function App() {
         <button className="btn-ghost" onClick={() => setShowNotifs(true)} disabled={!activeAddr}>
           🔔 Notifications {subscriptions.length > 0 ? `(${subscriptions.length})` : ""}
         </button>
-        <button className="btn-ghost" onClick={() => setShowSettings(true)}>⚙ Settings</button>
       </div>
 
       {error && <div className="error-msg">⚠ {error}</div>}
@@ -583,7 +582,7 @@ function App() {
 
           <div className="footer-note">
             Data: livepeer-network-api.cloudspe.com<br />
-            {getBackend() ? `Backend: ${new URL(getBackend()).hostname} (cron every 30m)` : "No backend configured — set one up in ⚙ Settings to enable Telegram notifications"}<br />
+            {`Backend: ${new URL(getBackend()).hostname} · checks every 30m`}<br />
             {wallets.length} wallet{wallets.length !== 1 ? "s" : ""} tracked · {subscriptions.length} subscription{subscriptions.length !== 1 ? "s" : ""}
           </div>
         </>
