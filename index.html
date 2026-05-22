@@ -3,6 +3,11 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#00e5a0" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="LiveWatch" />
+<link rel="manifest" href="manifest.json" />
 <title>LiveWatch · Livepeer Delegator Monitor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -238,6 +243,13 @@ function usd(val) {
 function pct(val) { return val == null ? "—" : Number(val).toFixed(2) + "%"; }
 function shortAddr(addr) { return addr ? addr.slice(0, 6) + "…" + addr.slice(-4) : ""; }
 function fmtDate(iso) { return iso ? new Date(iso).toLocaleDateString() : "—"; }
+function fmtDateTime(d) {
+  const dt = d instanceof Date ? d : new Date(d);
+  return dt.toLocaleString(undefined, {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit"
+  });
+}
 
 // ─── Storage ─────────────────────────────────────────────────────────────────
 const S = {
@@ -250,7 +262,31 @@ const S = {
   setSnap: (addr, snap) => localStorage.setItem(`lw_snap_${addr}`, JSON.stringify(snap)),
   getLinked: () => { try { return JSON.parse(localStorage.getItem("lw_tg_linked") || "null"); } catch { return null; } },
   setLinked: (data) => localStorage.setItem("lw_tg_linked", JSON.stringify(data)),
+  getBrowserPrefs: () => {
+    try { return JSON.parse(localStorage.getItem("lw_browser_prefs") || "null") || { enabled: false, reward_cut: true, fee_cut: true, missed_reward: true, claim_report: false }; }
+    catch { return { enabled: false, reward_cut: true, fee_cut: true, missed_reward: true, claim_report: false }; }
+  },
+  setBrowserPrefs: (p) => localStorage.setItem("lw_browser_prefs", JSON.stringify(p)),
 };
+
+// ─── Browser notifications ────────────────────────────────────────────────────
+function notifySupported() { return "Notification" in window; }
+function notifPermission() { return notifySupported() ? Notification.permission : "denied"; }
+async function requestNotifPermission() {
+  if (!notifySupported()) return "denied";
+  if (Notification.permission === "granted" || Notification.permission === "denied") return Notification.permission;
+  return await Notification.requestPermission();
+}
+function showBrowserNotification(title, body, tag) {
+  if (!notifySupported() || Notification.permission !== "granted") return;
+  try {
+    new Notification(title, {
+      body,
+      tag: tag || "livewatch",
+      icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23050a0e'/%3E%3Ccircle cx='32' cy='32' r='12' fill='%2300e5a0'/%3E%3C/svg%3E",
+    });
+  } catch (e) { console.warn("notify failed", e); }
+}
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 function App() {
@@ -310,19 +346,27 @@ function App() {
       const prevSnap = S.getSnap(addr);
       const cutsData = cuts.data || [];
       const localAlerts = [];
+      const browserPrefs = S.getBrowserPrefs();
+      const now = new Date();
       if (prevSnap?.cuts && cutsData.length > 0 && prevSnap.cuts.length > 0) {
         if (cutsData[0].event_id !== prevSnap.cuts[0].event_id) {
           if (cutsData[0].reward_cut_percent !== prevSnap.cuts[0].reward_cut_percent) {
             const up = Number(cutsData[0].reward_cut_percent) > Number(prevSnap.cuts[0].reward_cut_percent);
+            const msg = `Reward cut ${up?"↑":"↓"}: ${pct(prevSnap.cuts[0].reward_cut_percent)} → ${pct(cutsData[0].reward_cut_percent)}`;
             localAlerts.push({ id: Date.now()+1, type: up?"warn":"good", icon: up?"⚠️":"✅",
-              msg: `Reward cut ${up?"↑":"↓"}: ${pct(prevSnap.cuts[0].reward_cut_percent)} → ${pct(cutsData[0].reward_cut_percent)}`,
-              time: new Date().toLocaleTimeString() });
+              msg, time: fmtDateTime(now) });
+            if (browserPrefs.enabled && browserPrefs.reward_cut) {
+              showBrowserNotification(`${up?"⚠️":"✅"} LiveWatch — Reward Cut ${up?"Increased":"Decreased"}`, msg, "reward_cut");
+            }
           }
           if (cutsData[0].fee_cut_percent !== prevSnap.cuts[0].fee_cut_percent) {
             const up = Number(cutsData[0].fee_cut_percent) > Number(prevSnap.cuts[0].fee_cut_percent);
+            const msg = `Fee cut ${up?"↑":"↓"}: ${pct(prevSnap.cuts[0].fee_cut_percent)} → ${pct(cutsData[0].fee_cut_percent)}`;
             localAlerts.push({ id: Date.now()+2, type: up?"warn":"good", icon: up?"⚠️":"✅",
-              msg: `Fee cut ${up?"↑":"↓"}: ${pct(prevSnap.cuts[0].fee_cut_percent)} → ${pct(cutsData[0].fee_cut_percent)}`,
-              time: new Date().toLocaleTimeString() });
+              msg, time: fmtDateTime(now) });
+            if (browserPrefs.enabled && browserPrefs.fee_cut) {
+              showBrowserNotification(`${up?"⚠️":"✅"} LiveWatch — Fee Cut ${up?"Increased":"Decreased"}`, msg, "fee_cut");
+            }
           }
         }
       }
@@ -635,14 +679,17 @@ function SettingsModal({ onClose, onSave }) {
 }
 
 function NotificationsModal({ wallet, subscriptions, onClose, onChange, setError, setSuccess }) {
+  const [section, setSection] = useState("telegram"); // 'telegram' | 'browser'
   const [channel, setChannel] = useState("telegram");
-  const [notify, setNotify] = useState({ reward_cut: true, fee_cut: true, missed_reward: true });
+  const [notify, setNotify] = useState({ reward_cut: true, fee_cut: true, missed_reward: true, claim_report: false });
   const [tgCode, setTgCode] = useState(null);
   const [tgBotName, setTgBotName] = useState(null);
   const [tgChatId, setTgChatId] = useState(S.getLinked()?.chat_id || null);
   const [tgUsername, setTgUsername] = useState(S.getLinked()?.username || null);
   const [polling, setPolling] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [browserPrefs, setBrowserPrefs] = useState(S.getBrowserPrefs());
+  const [permission, setPermission] = useState(notifPermission());
   const pollRef = useRef(null);
 
   const startTelegramLink = async () => {
@@ -669,7 +716,7 @@ function NotificationsModal({ wallet, subscriptions, onClose, onChange, setError
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
   const createSub = async () => {
-    if (!notify.reward_cut && !notify.fee_cut && !notify.missed_reward) {
+    if (!notify.reward_cut && !notify.fee_cut && !notify.missed_reward && !notify.claim_report) {
       setError("Select at least one notification type."); return;
     }
     try {
@@ -680,6 +727,7 @@ function NotificationsModal({ wallet, subscriptions, onClose, onChange, setError
         notify_reward_cut: notify.reward_cut,
         notify_fee_cut: notify.fee_cut,
         notify_missed_reward: notify.missed_reward,
+        notify_claim_report: notify.claim_report,
         telegram_chat_id: tgChatId,
       };
       await backend("/subscriptions", { method: "POST", body: JSON.stringify(body) });
@@ -697,6 +745,25 @@ function NotificationsModal({ wallet, subscriptions, onClose, onChange, setError
     } catch (e) { setError(e.message); }
   };
 
+  const updateBrowserPrefs = (changes) => {
+    const next = { ...browserPrefs, ...changes };
+    setBrowserPrefs(next);
+    S.setBrowserPrefs(next);
+  };
+
+  const toggleBrowserEnabled = async (enabled) => {
+    if (enabled) {
+      const perm = await requestNotifPermission();
+      setPermission(perm);
+      if (perm !== "granted") {
+        setError("Notifications blocked by browser. Check site permissions.");
+        return;
+      }
+      showBrowserNotification("LiveWatch — Notifications Enabled", "You'll be notified here when something happens.", "test");
+    }
+    updateBrowserPrefs({ enabled });
+  };
+
   const canSubmit = channel === "telegram" && !!tgChatId;
 
   return (
@@ -704,87 +771,170 @@ function NotificationsModal({ wallet, subscriptions, onClose, onChange, setError
       <div className="modal" onClick={e => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-title">Notifications</div>
-        <div className="modal-subtitle">Get notified when changes happen for <code style={{color:"var(--accent)"}}>{shortAddr(wallet)}</code>. Backend polls every 30 minutes.</div>
+        <div className="modal-subtitle">Choose how you want to be alerted for <code style={{color:"var(--accent)"}}>{shortAddr(wallet)}</code>. Telegram works 24/7; browser notifications only fire while the page is loaded.</div>
 
-        {subscriptions.length > 0 && (
-          <div className="form-group">
-            <label className="form-label">Your Active Subscriptions</label>
-            {subscriptions.map(s => (
-              <div className="sub-item" key={s.id}>
-                <span className="sub-channel-icon">📱</span>
-                <div className="sub-info">
-                  <div className="sub-title">
-                    {shortAddr(s.wallet)}
-                    {s.notify_reward_cut ? " · Reward cut" : ""}
-                    {s.notify_fee_cut ? " · Fee cut" : ""}
-                    {s.notify_missed_reward ? " · Missed reward" : ""}
+        {/* Section tabs */}
+        <div className="channel-tabs">
+          <button className={`channel-tab ${section === "telegram" ? "active" : ""}`} onClick={() => setSection("telegram")}>📱 Telegram</button>
+          <button className={`channel-tab ${section === "browser" ? "active" : ""}`} onClick={() => setSection("browser")}>🌐 Browser</button>
+        </div>
+
+        {section === "telegram" && (
+          <>
+            {subscriptions.length > 0 && (
+              <div className="form-group">
+                <label className="form-label">Your Active Telegram Subscriptions</label>
+                {subscriptions.map(s => (
+                  <div className="sub-item" key={s.id}>
+                    <span className="sub-channel-icon">📱</span>
+                    <div className="sub-info">
+                      <div className="sub-title">
+                        {shortAddr(s.wallet)}
+                        {s.notify_reward_cut ? " · Reward cut" : ""}
+                        {s.notify_fee_cut ? " · Fee cut" : ""}
+                        {s.notify_missed_reward ? " · Missed reward" : ""}
+                        {s.notify_claim_report ? " · Claim reports" : ""}
+                      </div>
+                      <div className="sub-meta">Telegram chat {s.telegram_chat_id}</div>
+                    </div>
+                    <button className="btn-ghost danger" onClick={() => deleteSub(s.id)}>✕ Remove</button>
                   </div>
-                  <div className="sub-meta">Telegram chat {s.telegram_chat_id}</div>
-                </div>
-                <button className="btn-ghost danger" onClick={() => deleteSub(s.id)}>✕ Remove</button>
+                ))}
               </div>
-            ))}
-          </div>
+            )}
+
+            <div className="form-group">
+              <label className="form-label">Link Telegram</label>
+              {!tgChatId && !tgCode && (
+                <button className="btn" onClick={startTelegramLink} disabled={busy}>
+                  {busy ? <><span className="spinner" />Starting…</> : "Link Telegram"}
+                </button>
+              )}
+              {tgCode && !tgChatId && (
+                <div className="code-display">
+                  <div className="code">{tgCode}</div>
+                  <div className="code-help">
+                    Open Telegram → message <strong>@{tgBotName}</strong> → send this code<br />
+                    {polling && <><span className="spinner" />Waiting for your message…</>}
+                  </div>
+                </div>
+              )}
+              {tgChatId && (
+                <div style={{padding:12,background:"var(--bg)",border:"1px solid var(--accent)",borderRadius:4,fontSize:12,color:"var(--accent)"}}>
+                  ✓ Linked to {tgUsername ? `@${tgUsername}` : `chat ${tgChatId}`}
+                </div>
+              )}
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Alert Notifications</label>
+              <div className="checkbox-group">
+                <label className="checkbox-item">
+                  <input type="checkbox" checked={notify.reward_cut} onChange={e => setNotify(n => ({ ...n, reward_cut: e.target.checked }))} />
+                  <div className="ck-text">
+                    <div className="ck-title">Reward cut changes</div>
+                    <div className="ck-desc">When the orchestrator changes the % they keep from inflation rewards.</div>
+                  </div>
+                </label>
+                <label className="checkbox-item">
+                  <input type="checkbox" checked={notify.fee_cut} onChange={e => setNotify(n => ({ ...n, fee_cut: e.target.checked }))} />
+                  <div className="ck-text">
+                    <div className="ck-title">Fee cut changes</div>
+                    <div className="ck-desc">When the orchestrator adjusts the % they keep from transcoding fees.</div>
+                  </div>
+                </label>
+                <label className="checkbox-item">
+                  <input type="checkbox" checked={notify.missed_reward} onChange={e => setNotify(n => ({ ...n, missed_reward: e.target.checked }))} />
+                  <div className="ck-text">
+                    <div className="ck-title">Reward not claimed</div>
+                    <div className="ck-desc">When the orchestrator misses calling reward() — you lose inflation rewards for that round.</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Detailed Claim Reports</label>
+              <div className="checkbox-group">
+                <label className="checkbox-item">
+                  <input type="checkbox" checked={notify.claim_report} onChange={e => setNotify(n => ({ ...n, claim_report: e.target.checked }))} />
+                  <div className="ck-text">
+                    <div className="ck-title">Round claim reports</div>
+                    <div className="ck-desc">When the orchestrator successfully claims rewards for a round, get a breakdown: total minted LPT, orchestrator share, delegators share, your share, and USD value at time of claim.</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <button className="btn" onClick={createSub} disabled={!canSubmit || busy} style={{width:"100%"}}>
+              {busy ? <><span className="spinner" />Creating…</> : "Subscribe via Telegram"}
+            </button>
+          </>
         )}
 
-        <div className="form-group">
-          <label className="form-label">Add Subscription for {shortAddr(wallet)}</label>
-          <div className="channel-tabs">
-            <button className={`channel-tab ${channel === "telegram" ? "active" : ""}`} onClick={() => setChannel("telegram")}>📱 Telegram</button>
-            <button className="channel-tab disabled" disabled>🎮 Discord <span className="badge badge-soon" style={{marginLeft:6}}>Soon</span></button>
-          </div>
-
-          {!tgChatId && !tgCode && (
-            <button className="btn" onClick={startTelegramLink} disabled={busy}>
-              {busy ? <><span className="spinner" />Starting…</> : "Link Telegram"}
-            </button>
-          )}
-          {tgCode && !tgChatId && (
-            <div className="code-display">
-              <div className="code">{tgCode}</div>
-              <div className="code-help">
-                Open Telegram → message <strong>@{tgBotName}</strong> → send this code<br />
-                {polling && <><span className="spinner" />Waiting for your message…</>}
-              </div>
+        {section === "browser" && (
+          <>
+            <div className="form-group">
+              <label className="form-label">Enable Browser Notifications</label>
+              {!notifySupported() ? (
+                <div style={{padding:12,background:"rgba(255,107,53,.1)",border:"1px solid rgba(255,107,53,.3)",borderRadius:4,fontSize:12,color:"var(--warn)"}}>
+                  ⚠ Your browser doesn't support notifications.
+                </div>
+              ) : permission === "denied" ? (
+                <div style={{padding:12,background:"rgba(255,59,92,.1)",border:"1px solid rgba(255,59,92,.3)",borderRadius:4,fontSize:12,color:"var(--danger)"}}>
+                  Notifications blocked. Go to your browser's site settings for this page and allow notifications, then refresh.
+                </div>
+              ) : (
+                <label className="checkbox-item" style={{cursor:"pointer"}}>
+                  <input type="checkbox" checked={browserPrefs.enabled} onChange={e => toggleBrowserEnabled(e.target.checked)} />
+                  <div className="ck-text">
+                    <div className="ck-title">{browserPrefs.enabled ? "🔔 Enabled" : "🔕 Disabled"}</div>
+                    <div className="ck-desc">Get desktop/mobile popups while LiveWatch is open. Tip: install as a PWA (Add to Home Screen) for better persistence on mobile.</div>
+                  </div>
+                </label>
+              )}
             </div>
-          )}
-          {tgChatId && (
-            <div style={{padding:12,background:"var(--bg)",border:"1px solid var(--accent)",borderRadius:4,fontSize:12,color:"var(--accent)"}}>
-              ✓ Linked to {tgUsername ? `@${tgUsername}` : `chat ${tgChatId}`}
-            </div>
-          )}
-        </div>
 
-        <div className="form-group">
-          <label className="form-label">Notify Me About</label>
-          <div className="checkbox-group">
-            <label className="checkbox-item">
-              <input type="checkbox" checked={notify.reward_cut} onChange={e => setNotify(n => ({ ...n, reward_cut: e.target.checked }))} />
-              <div className="ck-text">
-                <div className="ck-title">Reward cut changes</div>
-                <div className="ck-desc">When the orchestrator changes the % they keep from inflation rewards.</div>
+            {browserPrefs.enabled && (
+              <div className="form-group">
+                <label className="form-label">Which Events to Notify</label>
+                <div className="checkbox-group">
+                  <label className="checkbox-item">
+                    <input type="checkbox" checked={browserPrefs.reward_cut} onChange={e => updateBrowserPrefs({ reward_cut: e.target.checked })} />
+                    <div className="ck-text">
+                      <div className="ck-title">Reward cut changes</div>
+                      <div className="ck-desc">Popup when orchestrator changes reward cut.</div>
+                    </div>
+                  </label>
+                  <label className="checkbox-item">
+                    <input type="checkbox" checked={browserPrefs.fee_cut} onChange={e => updateBrowserPrefs({ fee_cut: e.target.checked })} />
+                    <div className="ck-text">
+                      <div className="ck-title">Fee cut changes</div>
+                      <div className="ck-desc">Popup when orchestrator changes fee cut.</div>
+                    </div>
+                  </label>
+                  <label className="checkbox-item">
+                    <input type="checkbox" checked={browserPrefs.missed_reward} onChange={e => updateBrowserPrefs({ missed_reward: e.target.checked })} />
+                    <div className="ck-text">
+                      <div className="ck-title">Reward not claimed</div>
+                      <div className="ck-desc">Popup when orchestrator misses a round.</div>
+                    </div>
+                  </label>
+                  <label className="checkbox-item">
+                    <input type="checkbox" checked={browserPrefs.claim_report} onChange={e => updateBrowserPrefs({ claim_report: e.target.checked })} />
+                    <div className="ck-text">
+                      <div className="ck-title">Claim reports</div>
+                      <div className="ck-desc">Popup with claim breakdown when orchestrator claims rewards.</div>
+                    </div>
+                  </label>
+                </div>
+                <div style={{marginTop:12,fontSize:11,color:"var(--muted)",padding:12,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:4}}>
+                  💡 <strong>For mobile background notifications:</strong> use Telegram. Browser notifications only fire while the LiveWatch tab is open.
+                </div>
               </div>
-            </label>
-            <label className="checkbox-item">
-              <input type="checkbox" checked={notify.fee_cut} onChange={e => setNotify(n => ({ ...n, fee_cut: e.target.checked }))} />
-              <div className="ck-text">
-                <div className="ck-title">Fee cut changes</div>
-                <div className="ck-desc">When the orchestrator adjusts the % they keep from transcoding fees.</div>
-              </div>
-            </label>
-            <label className="checkbox-item">
-              <input type="checkbox" checked={notify.missed_reward} onChange={e => setNotify(n => ({ ...n, missed_reward: e.target.checked }))} />
-              <div className="ck-text">
-                <div className="ck-title">Reward not claimed</div>
-                <div className="ck-desc">When the orchestrator misses calling reward() — you lose inflation rewards for that round.</div>
-              </div>
-            </label>
-          </div>
-        </div>
-
-        <button className="btn" onClick={createSub} disabled={!canSubmit || busy} style={{width:"100%"}}>
-          {busy ? <><span className="spinner" />Creating…</> : "Subscribe"}
-        </button>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
