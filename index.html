@@ -153,6 +153,45 @@
   .sub-title { font-size: 12px; color: var(--text); }
   .sub-meta { font-size: 10px; color: var(--muted); margin-top: 3px; word-break: break-all; }
 
+  /* Network metrics table */
+  .metrics-table { width: 100%; border-collapse: collapse; }
+  .metrics-table tr { cursor: pointer; transition: background 0.15s; }
+  .metrics-table tbody tr:hover { background: rgba(0,229,160,0.04); }
+  .metrics-table th { text-align: left; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); padding: 10px 14px; border-bottom: 1px solid var(--border); font-weight: 500; }
+  .metrics-table td { padding: 14px; border-bottom: 1px solid var(--border); vertical-align: middle; font-size: 13px; }
+  .metrics-table tr:last-child td { border-bottom: none; }
+  .metric-label { color: var(--text); font-weight: 500; }
+  .metric-value { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .metric-value.accent { color: var(--accent); }
+  .metric-value.accent2 { color: var(--accent2); }
+  .metric-delta { font-size: 11px; padding: 2px 8px; border-radius: 3px; display: inline-block; font-variant-numeric: tabular-nums; }
+  .metric-delta.up { background: rgba(0,229,160,0.12); color: var(--accent); }
+  .metric-delta.down { background: rgba(255,59,92,0.12); color: var(--danger); }
+  .metric-delta.flat { background: rgba(255,255,255,0.04); color: var(--muted); }
+  .metric-spark { display: inline-block; vertical-align: middle; }
+  .metric-arrow { font-size: 11px; color: var(--muted); margin-left: 8px; }
+
+  /* Chart modal */
+  .chart-modal { max-width: 900px; }
+  .chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; gap: 12px; flex-wrap: wrap; }
+  .chart-current { font-size: 28px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .chart-current.accent2 { color: var(--accent2); }
+  .chart-current-label { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+  .chart-range-tabs { display: flex; gap: 4px; background: var(--bg); padding: 4px; border-radius: 4px; border: 1px solid var(--border); }
+  .chart-range-tab { padding: 6px 14px; border-radius: 3px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; background: none; border: none; color: var(--muted); font-family: var(--font-mono); transition: all .15s; }
+  .chart-range-tab.active { background: var(--accent); color: var(--bg); font-weight: 600; }
+  .chart-svg { width: 100%; height: 320px; }
+  .chart-grid-line { stroke: var(--border); stroke-width: 1; }
+  .chart-axis-label { fill: var(--muted); font-size: 10px; font-family: var(--font-mono); }
+  .chart-line { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .chart-line.accent2 { stroke: var(--accent2); }
+  .chart-area { opacity: 0.15; }
+  .chart-tooltip { position: absolute; background: var(--bg); border: 1px solid var(--accent); border-radius: 4px; padding: 8px 12px; font-size: 11px; pointer-events: none; white-space: nowrap; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+  .chart-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .chart-stat-label { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+  .chart-stat-value { font-size: 14px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+  .chart-empty { padding: 80px 24px; text-align: center; color: var(--muted); font-size: 12px; }
+
   @media (max-width: 640px) {
     .row { flex-direction: column; }
     .header { flex-direction: column; align-items: flex-start; }
@@ -346,6 +385,7 @@ function App() {
   const [roundsMap, setRoundsMap] = useState([]); // sorted array of {round, started_block}
   const [treasuryLpt, setTreasuryLpt] = useState(null);
   const [lptPriceUsd, setLptPriceUsd] = useState(null);
+  const [selectedMetric, setSelectedMetric] = useState(null); // {key, label, ...} for chart modal
 
   // Look up round number for a given block number using the rounds map
   const blockToRound = (blockNumber) => {
@@ -703,22 +743,16 @@ function App() {
 
           {networkStats && (
             <div className="card">
-              <div className="card-title">Network Context</div>
-              <div className="stats-grid">
-                <div className="stat"><div className="stat-label">Active Orchs</div><div className="stat-value">{networkStats.active_orchestrators}</div></div>
-                <div className="stat"><div className="stat-label">Total LPT Staked</div><div className="stat-value accent">{lpt(networkStats.total_lpt_staked)}</div></div>
-                <div className="stat"><div className="stat-label">Payouts 24h</div><div className="stat-value">{usd(networkStats.payouts_usd_24h)}</div></div>
-                <div className="stat"><div className="stat-label">Rewards 24h</div><div className="stat-value">{usd(networkStats.rewards_usd_24h)}</div></div>
-                <div className="stat">
-                  <div className="stat-label">Treasury LPT</div>
-                  <div className="stat-value accent2">
-                    {treasuryLpt != null ? `${treasuryLpt.toFixed(2)} LPT` : <span style={{color:"var(--muted)",fontSize:14}}>Loading…</span>}
-                  </div>
-                  {treasuryLpt != null && lptPriceUsd != null && (
-                    <div className="stat-sub">~{usd(treasuryLpt * lptPriceUsd)}</div>
-                  )}
-                </div>
+              <div className="card-title">
+                <span>Network Context</span>
+                <span style={{fontSize:10,color:"var(--muted)",letterSpacing:1}}>click row for 90-day chart</span>
               </div>
+              <NetworkMetricsTable
+                networkStats={networkStats}
+                treasuryLpt={treasuryLpt}
+                lptPriceUsd={lptPriceUsd}
+                onSelectMetric={setSelectedMetric}
+              />
             </div>
           )}
 
@@ -742,6 +776,14 @@ function App() {
           onChange={() => backend(`/subscriptions?client_id=${CLIENT_ID}`).then(r => setSubscriptions(r.subscriptions || []))}
           setError={setError}
           setSuccess={setSuccess}
+        />
+      )}
+
+      {selectedMetric && (
+        <MetricChartModal
+          metric={selectedMetric}
+          lptPriceUsd={lptPriceUsd}
+          onClose={() => setSelectedMetric(null)}
         />
       )}
     </div>
@@ -1025,6 +1067,397 @@ function NotificationsModal({ wallet, subscriptions, onClose, onChange, setError
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── Network Metrics Table ───────────────────────────────────────────────────
+function NetworkMetricsTable({ networkStats, treasuryLpt, lptPriceUsd, onSelectMetric }) {
+  const [prevRound, setPrevRound] = useState(null);
+  const [prevDay, setPrevDay] = useState(null);
+  const [sparks, setSparks] = useState({}); // metric_key -> array of {x, y}
+
+  // Fetch previous round and yesterday's totals for delta calc
+  useEffect(() => {
+    (async () => {
+      try {
+        // Get the previous round
+        if (networkStats.latest_round) {
+          const prevRoundId = Number(networkStats.latest_round) - 1;
+          const r = await api(`/rounds/${prevRoundId}`).catch(() => null);
+          if (r) setPrevRound(r);
+        }
+        // Get yesterday's payout/reward summaries
+        const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+        const dateStr = yesterday.toISOString().slice(0, 10);
+        const [payRes, rewRes] = await Promise.all([
+          api(`/payouts/summary/daily/${dateStr}`).catch(() => null),
+          api(`/rewards/summary/daily/${dateStr}`).catch(() => null),
+        ]);
+        setPrevDay({ payouts: payRes?.sum_commission_usd, rewards: rewRes?.sum_total_tokens_usd });
+      } catch (e) { console.warn("Prev period fetch failed:", e.message); }
+    })();
+  }, [networkStats.latest_round]);
+
+  // Fetch sparkline data (30 days) for all metrics in parallel
+  useEffect(() => {
+    (async () => {
+      try {
+        // Rounds index for stake + active orchs (last 30 rounds)
+        const roundsRes = await api(`/rounds`, { limit: 30 }).catch(() => null);
+        const rounds = (roundsRes?.data || []).slice().reverse(); // oldest -> newest
+
+        // Aggregations for payouts and rewards (last 30 days, USD)
+        const today = new Date();
+        const from = new Date(); from.setDate(from.getDate() - 30);
+        const payAggr = await api(`/aggregations/events`, {
+          contract: "TicketBroker",
+          event_name: "WinningTicketRedeemed",
+          bucket: "day",
+          metric: "sum_amount_usd",
+          from: from.toISOString().slice(0, 10),
+          to: today.toISOString().slice(0, 10),
+        }).catch(() => null);
+        const rewAggr = await api(`/aggregations/events`, {
+          contract: "BondingManager",
+          event_name: "Reward",
+          bucket: "day",
+          metric: "sum_amount_usd",
+          from: from.toISOString().slice(0, 10),
+          to: today.toISOString().slice(0, 10),
+        }).catch(() => null);
+
+        // Treasury history from backend
+        const treasuryRes = await backend(`/treasury/history?days=30`).catch(() => null);
+
+        setSparks({
+          active_orchs: rounds.map(r => ({ x: r.started_at, y: r.active_orchestrators })),
+          total_stake: rounds.map(r => ({ x: r.started_at, y: Number(r.total_lpt_staked) })),
+          payouts: (payAggr?.results || []).map(b => ({ x: b.bucket_start, y: Number(b.value || 0) })),
+          rewards: (rewAggr?.results || []).map(b => ({ x: b.bucket_start, y: Number(b.value || 0) })),
+          treasury: (treasuryRes?.history || []).map(t => ({ x: t.date, y: t.balance })),
+        });
+      } catch (e) { console.warn("Sparkline fetch failed:", e.message); }
+    })();
+  }, []);
+
+  const metrics = [
+    {
+      key: "active_orchs",
+      label: "Active Orchs",
+      value: networkStats.active_orchestrators,
+      formatted: networkStats.active_orchestrators,
+      prev: prevRound?.active_orchestrators,
+      formatDelta: (d) => (d > 0 ? "+" : "") + d,
+      cls: "",
+      spark_color: "var(--accent)",
+    },
+    {
+      key: "total_stake",
+      label: "Total LPT Staked",
+      value: Number(networkStats.total_lpt_staked),
+      formatted: lpt(networkStats.total_lpt_staked, 0),
+      prev: prevRound?.total_lpt_staked ? Number(prevRound.total_lpt_staked) : null,
+      formatDelta: (d) => (d > 0 ? "+" : "") + d.toFixed(2) + " LPT",
+      cls: "accent",
+      spark_color: "var(--accent)",
+    },
+    {
+      key: "payouts",
+      label: "Payouts 24h",
+      value: Number(networkStats.payouts_usd_24h),
+      formatted: usd(networkStats.payouts_usd_24h),
+      prev: prevDay?.payouts ? Number(prevDay.payouts) : null,
+      formatDelta: (d) => (d > 0 ? "+" : "") + "$" + d.toFixed(2),
+      cls: "",
+      spark_color: "var(--accent)",
+    },
+    {
+      key: "rewards",
+      label: "Rewards 24h",
+      value: Number(networkStats.rewards_usd_24h),
+      formatted: usd(networkStats.rewards_usd_24h),
+      prev: prevDay?.rewards ? Number(prevDay.rewards) : null,
+      formatDelta: (d) => (d > 0 ? "+" : "") + "$" + d.toFixed(2),
+      cls: "",
+      spark_color: "var(--accent)",
+    },
+    {
+      key: "treasury",
+      label: "Treasury LPT",
+      value: treasuryLpt,
+      formatted: treasuryLpt != null
+        ? lpt(treasuryLpt, 2) + (lptPriceUsd != null ? `  (~${usd(treasuryLpt * lptPriceUsd)})` : "")
+        : "Loading…",
+      prev: null,
+      formatDelta: () => null,
+      cls: "accent2",
+      spark_color: "var(--accent2)",
+    },
+  ];
+
+  return (
+    <table className="metrics-table">
+      <thead>
+        <tr>
+          <th>Metric</th>
+          <th>Current</th>
+          <th>Δ vs prev</th>
+          <th>30d trend</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {metrics.map(m => {
+          const delta = (m.prev != null && m.value != null) ? Number(m.value) - Number(m.prev) : null;
+          const deltaCls = delta == null ? "flat" : delta > 0 ? "up" : delta < 0 ? "down" : "flat";
+          const deltaStr = delta == null ? "—" : m.formatDelta(delta);
+          const series = sparks[m.key] || [];
+          return (
+            <tr key={m.key} onClick={() => onSelectMetric(m)}>
+              <td className="metric-label">{m.label}</td>
+              <td className={`metric-value ${m.cls}`}>{m.formatted}</td>
+              <td>
+                <span className={`metric-delta ${deltaCls}`}>{delta != null ? (delta > 0 ? "↑ " : delta < 0 ? "↓ " : "") + deltaStr : "—"}</span>
+              </td>
+              <td>
+                {series.length > 0
+                  ? <Sparkline data={series} color={m.spark_color} />
+                  : <span style={{color:"var(--muted)",fontSize:10}}>—</span>}
+              </td>
+              <td className="metric-arrow">→</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+// ─── Sparkline (small SVG line) ──────────────────────────────────────────────
+function Sparkline({ data, color = "var(--accent)", width = 100, height = 28 }) {
+  if (!data || data.length < 2) return <span style={{color:"var(--muted)",fontSize:10}}>—</span>;
+  const values = data.map(d => Number(d.y) || 0);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const step = width / (data.length - 1);
+  const points = data.map((d, i) => {
+    const x = i * step;
+    const y = height - ((Number(d.y) - min) / range) * height;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  return (
+    <svg className="metric-spark" width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+      <polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// ─── Metric Chart Modal ──────────────────────────────────────────────────────
+function MetricChartModal({ metric, lptPriceUsd, onClose }) {
+  const [range, setRange] = useState("30d"); // 1d, 7d, 30d, 90d
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const rangeDays = { "1d": 1, "7d": 7, "30d": 30, "90d": 90 }[range];
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true); setError(null);
+      try {
+        let series = [];
+        const today = new Date();
+        const from = new Date(); from.setDate(from.getDate() - rangeDays);
+
+        if (metric.key === "total_stake" || metric.key === "active_orchs") {
+          const res = await api(`/rounds`, { limit: rangeDays });
+          const rounds = (res?.data || []).slice().reverse();
+          if (metric.key === "total_stake") {
+            series = rounds.map(r => ({ x: r.started_at, y: Number(r.total_lpt_staked) }));
+          } else {
+            series = rounds.map(r => ({ x: r.started_at, y: r.active_orchestrators }));
+          }
+        } else if (metric.key === "payouts" || metric.key === "rewards") {
+          const eventName = metric.key === "payouts" ? "WinningTicketRedeemed" : "Reward";
+          const contract = metric.key === "payouts" ? "TicketBroker" : "BondingManager";
+          const res = await api(`/aggregations/events`, {
+            contract, event_name: eventName, bucket: "day", metric: "sum_amount_usd",
+            from: from.toISOString().slice(0, 10),
+            to: today.toISOString().slice(0, 10),
+          });
+          series = (res?.results || []).map(b => ({ x: b.bucket_start, y: Number(b.value || 0) }));
+        } else if (metric.key === "treasury") {
+          const res = await backend(`/treasury/history?days=${rangeDays}`);
+          series = (res?.history || []).map(t => ({ x: t.date, y: t.balance }));
+        }
+
+        if (!cancelled) setData(series);
+      } catch (e) {
+        if (!cancelled) setError(e.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [metric.key, range, rangeDays]);
+
+  // Compute chart stats
+  const values = data.map(d => Number(d.y) || 0);
+  const min = values.length ? Math.min(...values) : 0;
+  const max = values.length ? Math.max(...values) : 0;
+  const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+  const first = values[0] || 0;
+  const last = values[values.length - 1] || 0;
+  const change = last - first;
+  const changePct = first !== 0 ? (change / first) * 100 : 0;
+
+  const isUsd = metric.key === "payouts" || metric.key === "rewards";
+  const isLpt = metric.key === "total_stake" || metric.key === "treasury";
+  const formatVal = (v) => {
+    if (isUsd) return usd(v);
+    if (isLpt) return lpt(v, 0);
+    return fmtNumber(v, { maximumFractionDigits: 0 });
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal chart-modal" onClick={e => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="modal-title">{metric.label}</div>
+
+        <div className="chart-header">
+          <div>
+            <div className="chart-current-label">Current</div>
+            <div className={`chart-current ${metric.cls}`}>{metric.formatted}</div>
+          </div>
+          <div className="chart-range-tabs">
+            {["1d", "7d", "30d", "90d"].map(r => (
+              <button key={r} className={`chart-range-tab ${range === r ? "active" : ""}`} onClick={() => setRange(r)}>{r}</button>
+            ))}
+          </div>
+        </div>
+
+        {loading && <div className="chart-empty"><span className="spinner" />Loading {range} chart…</div>}
+        {error && <div className="error-msg">⚠ {error}</div>}
+        {!loading && !error && data.length < 2 && (
+          <div className="chart-empty">Not enough data for {range} chart.</div>
+        )}
+        {!loading && !error && data.length >= 2 && (
+          <>
+            <LineChart data={data} formatVal={formatVal} color={metric.cls === "accent2" ? "var(--accent2)" : "var(--accent)"} />
+            <div className="chart-stats">
+              <div><div className="chart-stat-label">Start</div><div className="chart-stat-value">{formatVal(first)}</div></div>
+              <div><div className="chart-stat-label">End</div><div className="chart-stat-value">{formatVal(last)}</div></div>
+              <div><div className="chart-stat-label">Change</div><div className="chart-stat-value" style={{color: change > 0 ? "var(--accent)" : change < 0 ? "var(--danger)" : "var(--text)"}}>
+                {change > 0 ? "+" : ""}{formatVal(change)} ({changePct > 0 ? "+" : ""}{changePct.toFixed(2)}%)
+              </div></div>
+              <div><div className="chart-stat-label">Min</div><div className="chart-stat-value">{formatVal(min)}</div></div>
+              <div><div className="chart-stat-label">Max</div><div className="chart-stat-value">{formatVal(max)}</div></div>
+              <div><div className="chart-stat-label">Avg</div><div className="chart-stat-value">{formatVal(avg)}</div></div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Line Chart (full size with axes) ────────────────────────────────────────
+function LineChart({ data, formatVal, color = "var(--accent)" }) {
+  const [hover, setHover] = useState(null);
+  const svgRef = useRef(null);
+
+  const W = 800, H = 320;
+  const PAD_L = 64, PAD_R = 16, PAD_T = 16, PAD_B = 40;
+  const innerW = W - PAD_L - PAD_R;
+  const innerH = H - PAD_T - PAD_B;
+
+  const values = data.map(d => Number(d.y) || 0);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const padding = range * 0.1;
+  const yMin = Math.max(0, min - padding);
+  const yMax = max + padding;
+  const yRange = yMax - yMin || 1;
+
+  const xStep = innerW / (data.length - 1 || 1);
+  const points = data.map((d, i) => {
+    const x = PAD_L + i * xStep;
+    const y = PAD_T + innerH - ((Number(d.y) - yMin) / yRange) * innerH;
+    return { x, y, dx: d.x, dy: Number(d.y) };
+  });
+  const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+  const areaD = `${pathD} L ${points[points.length - 1].x.toFixed(1)} ${PAD_T + innerH} L ${PAD_L} ${PAD_T + innerH} Z`;
+
+  // Y-axis gridlines (5 of them)
+  const ySteps = 5;
+  const yLines = Array.from({ length: ySteps + 1 }, (_, i) => {
+    const value = yMin + (yRange * i) / ySteps;
+    const y = PAD_T + innerH - (i / ySteps) * innerH;
+    return { value, y };
+  });
+
+  // X-axis labels (5 evenly-spaced)
+  const xLabelCount = Math.min(5, data.length);
+  const xLabels = Array.from({ length: xLabelCount }, (_, i) => {
+    const idx = Math.floor((data.length - 1) * i / (xLabelCount - 1));
+    return { idx, x: PAD_L + idx * xStep, label: new Date(data[idx].x).toLocaleDateString(undefined, { day: "2-digit", month: "short" }) };
+  });
+
+  const handleMove = (e) => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const mx = ((e.clientX - rect.left) / rect.width) * W;
+    // Find closest point
+    let closest = null, closestDist = Infinity;
+    for (const p of points) {
+      const d = Math.abs(p.x - mx);
+      if (d < closestDist) { closestDist = d; closest = p; }
+    }
+    setHover(closest);
+  };
+
+  return (
+    <div style={{position:"relative"}}>
+      <svg ref={svgRef} className="chart-svg" viewBox={`0 0 ${W} ${H}`} onMouseMove={handleMove} onMouseLeave={() => setHover(null)} preserveAspectRatio="none">
+        {/* Gridlines */}
+        {yLines.map((g, i) => (
+          <g key={i}>
+            <line className="chart-grid-line" x1={PAD_L} y1={g.y} x2={W - PAD_R} y2={g.y} />
+            <text className="chart-axis-label" x={PAD_L - 8} y={g.y + 4} textAnchor="end">{formatVal(g.value)}</text>
+          </g>
+        ))}
+        {/* X-axis labels */}
+        {xLabels.map((l, i) => (
+          <text key={i} className="chart-axis-label" x={l.x} y={H - PAD_B + 18} textAnchor="middle">{l.label}</text>
+        ))}
+        {/* Area fill */}
+        <path className="chart-area" d={areaD} fill={color} />
+        {/* Line */}
+        <path d={pathD} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        {/* Hover indicator */}
+        {hover && (
+          <>
+            <line x1={hover.x} y1={PAD_T} x2={hover.x} y2={PAD_T + innerH} stroke={color} strokeWidth="1" strokeDasharray="3,3" opacity="0.5" />
+            <circle cx={hover.x} cy={hover.y} r="5" fill={color} stroke="var(--bg)" strokeWidth="2" />
+          </>
+        )}
+      </svg>
+      {hover && (
+        <div className="chart-tooltip" style={{
+          left: `${(hover.x / W) * 100}%`,
+          top: `${(hover.y / H) * 100}%`,
+          transform: "translate(-50%, -120%)",
+        }}>
+          <div style={{color:"var(--muted)",fontSize:10,marginBottom:2}}>{new Date(hover.dx).toLocaleDateString(undefined, {day:"2-digit",month:"short",year:"numeric"})}</div>
+          <div style={{color:color,fontWeight:600}}>{formatVal(hover.dy)}</div>
+        </div>
+      )}
     </div>
   );
 }
