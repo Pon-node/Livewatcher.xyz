@@ -266,15 +266,16 @@ function getBackend() { return "https://livewatch-backend.pon-node.workers.dev";
 // Livepeer contracts on Arbitrum One (from docs.livepeer.org)
 const TREASURY_ADDR = "0xf82C1FF415F1fCf582554fDba790E27019c8E8C4";
 const LPT_TOKEN_ADDR = "0x289ba1701C2F088cf0faf8B3705246331cB8A839";
+const BONDING_MANAGER_ADDR = "0x35Bcf3c30594191d53231e4ff333e8a770453e40";
+const ROUNDS_MANAGER_ADDR = "0xdd6f56DcC28D3F5f27084381fE8Df634985cc39f";
 const ARB_RPCS = [
   "https://arbitrum-one-rpc.publicnode.com",
   "https://arbitrum.drpc.org",
   "https://arb1.arbitrum.io/rpc",
 ];
 
-// ERC20 balanceOf selector: 0x70a08231
-async function getLptBalance(address) {
-  const data = "0x70a08231" + address.toLowerCase().replace("0x", "").padStart(64, "0");
+// Generic eth_call against public Arbitrum RPCs with fallback
+async function ethCall(to, data) {
   for (const rpcUrl of ARB_RPCS) {
     try {
       const res = await fetch(rpcUrl, {
@@ -282,18 +283,43 @@ async function getLptBalance(address) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jsonrpc: "2.0", id: 1, method: "eth_call",
-          params: [{ to: LPT_TOKEN_ADDR, data }, "latest"],
+          params: [{ to, data }, "latest"],
         }),
       });
       if (!res.ok) continue;
       const json = await res.json();
       if (json.error || !json.result) continue;
-      // Convert hex to LPT (18 decimals)
-      const wei = BigInt(json.result);
-      return Number(wei) / 1e18;
+      return json.result;
     } catch {}
   }
-  throw new Error("All Arbitrum RPCs failed");
+  return null;
+}
+
+// ERC20 balanceOf
+async function getLptBalance(address) {
+  const data = "0x70a08231" + address.toLowerCase().replace("0x", "").padStart(64, "0");
+  const hex = await ethCall(LPT_TOKEN_ADDR, data);
+  if (!hex) throw new Error("All Arbitrum RPCs failed");
+  return Number(BigInt(hex)) / 1e18;
+}
+
+// BondingManager.getTranscoder(address) -> first field is lastRewardRound (selector 0x1944cb05)
+async function getLastRewardRound(orchestrator) {
+  const data = "0x1944cb05" + orchestrator.toLowerCase().replace("0x", "").padStart(64, "0");
+  const hex = await ethCall(BONDING_MANAGER_ADDR, data);
+  if (!hex) return null;
+  const cleaned = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (cleaned.length < 64) return null;
+  try { return Number(BigInt("0x" + cleaned.slice(0, 64))); }
+  catch { return null; }
+}
+
+// RoundsManager.currentRound() (selector 0x8a19c8bc)
+async function getCurrentRound() {
+  const hex = await ethCall(ROUNDS_MANAGER_ADDR, "0x8a19c8bc");
+  if (!hex) return null;
+  try { return Number(BigInt(hex)); }
+  catch { return null; }
 }
 
 async function backend(path, opts = {}) {
@@ -567,7 +593,71 @@ function App() {
         }
       }
       if (localAlerts.length) setAlerts(p => [...localAlerts, ...p].slice(0, 30));
-      S.setSnap(addr, { cuts: cutsData });
+
+      // Missed reward check (on-chain RPC) — only if browser notifications enabled for this
+      if (browserPrefs.enabled && browserPrefs.missed_reward) {
+        try {
+          const [chainCurrent, chainLastReward] = await Promise.all([
+            getCurrentRound(),
+            getLastRewardRound(orchAddr),
+          ]);
+          if (chainCurrent != null && chainLastReward != null) {
+            const claimed = chainLastReward >= chainCurrent;
+            const wasMissed = prevSnap?.missed_round || 0;
+            if (!claimed && wasMissed !== chainCurrent) {
+              // First time seeing this round as unclaimed
+              const msg = `Round ${chainCurrent} not yet claimed by orchestrator`;
+              localAlerts.push({ id: Date.now()+3, type: "warn", icon: "🔴", msg, time: fmtDateTime(now) });
+              showBrowserNotification("🔴 LiveWatch — Current Round Not Claimed", msg, "missed_reward");
+            } else if (claimed && wasMissed) {
+              // Resolution
+              const msg = `Round ${chainCurrent} claimed ✓`;
+              localAlerts.push({ id: Date.now()+4, type: "good", icon: "✅", msg, time: fmtDateTime(now) });
+              showBrowserNotification("✅ LiveWatch — Reward Claimed", msg, "missed_reward");
+            }
+            // Persist state in snapshot
+            S.setSnap(addr, { cuts: cutsData, missed_round: claimed ? 0 : chainCurrent, last_reward_event: prevSnap?.last_reward_event });
+          } else {
+            S.setSnap(addr, { cuts: cutsData, missed_round: prevSnap?.missed_round || 0, last_reward_event: prevSnap?.last_reward_event });
+          }
+        } catch (e) {
+          console.warn("Missed-reward RPC check failed:", e.message);
+          S.setSnap(addr, { cuts: cutsData, missed_round: prevSnap?.missed_round || 0, last_reward_event: prevSnap?.last_reward_event });
+        }
+      } else {
+        S.setSnap(addr, { cuts: cutsData, missed_round: prevSnap?.missed_round || 0, last_reward_event: prevSnap?.last_reward_event });
+      }
+
+      // Claim report check (API) — fire when a new Reward event appears
+      if (browserPrefs.enabled && browserPrefs.claim_report) {
+        try {
+          const rewardRes = await api(`/events`, {
+            contract: "BondingManager", event_name: "Reward",
+            address: orchAddr, sort: "block_number_desc", limit: 1,
+            with_valuations: true,
+          });
+          const latestReward = (rewardRes?.data || [])[0];
+          if (latestReward && prevSnap?.last_reward_event && latestReward.id !== prevSnap.last_reward_event) {
+            const lptAmount = Number(latestReward.amount_native || 0);
+            const usdRow = (latestReward.valuations || []).find(v => v.asset === "LPT");
+            const usdAmount = usdRow ? Number(usdRow.amount_usd || 0) : null;
+            const msg = `Orchestrator claimed ${lptAmount.toFixed(4)} LPT` + (usdAmount ? ` (~$${usdAmount.toFixed(2)})` : "");
+            localAlerts.push({ id: Date.now()+5, type: "good", icon: "💰", msg, time: fmtDateTime(now) });
+            showBrowserNotification("💰 LiveWatch — Rewards Claimed", msg, "claim_report");
+          }
+          // Always update last_reward_event so we don't re-trigger
+          if (latestReward) {
+            const snapNow = S.getSnap(addr) || {};
+            S.setSnap(addr, { ...snapNow, last_reward_event: latestReward.id });
+          }
+        } catch (e) { console.warn("Claim report API check failed:", e.message); }
+      }
+      // Re-set alerts if we added more after the first setAlerts call
+      if (localAlerts.length) setAlerts(p => {
+        const seen = new Set(p.map(x => x.id));
+        const fresh = localAlerts.filter(x => !seen.has(x.id));
+        return [...fresh, ...p].slice(0, 30);
+      });
 
       setOrchestrator(orch);
       setCutsHistory(cutsData);
