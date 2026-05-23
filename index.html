@@ -44,6 +44,27 @@
   .wallet-chip.active { background: rgba(0,229,160,.12); border-color: var(--accent); color: var(--accent); }
   .wallet-chip .x { color: var(--muted); padding-left: 4px; border-left: 1px solid var(--border2); margin-left: 4px; }
   .wallet-chip .x:hover { color: var(--danger); }
+  .wallet-chip .edit { color: var(--muted); padding: 0 2px; font-size: 10px; }
+  .wallet-chip .edit:hover { color: var(--accent); }
+  .wallet-chip .nick { font-weight: 600; }
+  .wallet-chip .sub-addr { color: var(--muted); font-size: 10px; margin-left: 4px; }
+
+  /* TG login button (looks like the official Telegram widget) */
+  .tg-login-btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #2AABEE; color: #fff; border: none; border-radius: 4px;
+    padding: 10px 16px; font-family: var(--font-mono); font-size: 12px;
+    font-weight: 600; cursor: pointer; transition: opacity .2s;
+  }
+  .tg-login-btn:hover { opacity: 0.9; }
+  .tg-login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .tg-user-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(0,229,160,0.1); color: var(--accent);
+    padding: 6px 12px; border: 1px solid rgba(0,229,160,0.3);
+    border-radius: 20px; font-size: 11px;
+  }
+  .tg-user-avatar { width: 20px; height: 20px; border-radius: 50%; }
 
   .search-wrap { display: flex; gap: 12px; margin-bottom: 16px; }
   .search-input { flex: 1; background: var(--surface); border: 1px solid var(--border2); border-radius: 4px; padding: 14px 18px; font-family: var(--font-mono); font-size: 13px; color: var(--text); outline: none; transition: border-color .2s; min-width: 0; }
@@ -334,6 +355,17 @@ const S = {
   setSnap: (addr, snap) => localStorage.setItem(`lw_snap_${addr}`, JSON.stringify(snap)),
   getLinked: () => { try { return JSON.parse(localStorage.getItem("lw_tg_linked") || "null"); } catch { return null; } },
   setLinked: (data) => localStorage.setItem("lw_tg_linked", JSON.stringify(data)),
+  getNicknames: () => { try { return JSON.parse(localStorage.getItem("lw_nicknames") || "{}"); } catch { return {}; } },
+  setNicknames: (n) => localStorage.setItem("lw_nicknames", JSON.stringify(n)),
+  getNickname: (addr) => { const map = S.getNicknames(); return map[addr.toLowerCase()] || null; },
+  setNickname: (addr, name) => {
+    const map = S.getNicknames();
+    if (name) map[addr.toLowerCase()] = name;
+    else delete map[addr.toLowerCase()];
+    S.setNicknames(map);
+  },
+  getTgUser: () => { try { return JSON.parse(localStorage.getItem("lw_tg_user") || "null"); } catch { return null; } },
+  setTgUser: (u) => u ? localStorage.setItem("lw_tg_user", JSON.stringify(u)) : localStorage.removeItem("lw_tg_user"),
   getBrowserPrefs: () => {
     try { return JSON.parse(localStorage.getItem("lw_browser_prefs") || "null") || { enabled: false, reward_cut: true, fee_cut: true, missed_reward: true, claim_report: false }; }
     catch { return { enabled: false, reward_cut: true, fee_cut: true, missed_reward: true, claim_report: false }; }
@@ -385,7 +417,45 @@ function App() {
   const [roundsMap, setRoundsMap] = useState([]); // sorted array of {round, started_block}
   const [treasuryLpt, setTreasuryLpt] = useState(null);
   const [lptPriceUsd, setLptPriceUsd] = useState(null);
-  const [selectedMetric, setSelectedMetric] = useState(null); // {key, label, ...} for chart modal
+  const [selectedMetric, setSelectedMetric] = useState(null);
+  const [nicknames, setNicknames] = useState(S.getNicknames());
+  const [tgUser, setTgUser] = useState(S.getTgUser());
+
+  const updateNickname = (addr, name) => {
+    S.setNickname(addr, name);
+    setNicknames(S.getNicknames());
+    // Push to backend if we have subs for this wallet
+    if (getBackend()) {
+      backend(`/nicknames`, {
+        method: "POST",
+        body: JSON.stringify({
+          client_id: CLIENT_ID,
+          tg_user_id: tgUser?.id,
+          wallet: addr.toLowerCase(),
+          nickname: name || null,
+        }),
+      }).catch(() => {});
+    }
+  };
+  const displayNick = (addr) => nicknames[addr.toLowerCase()] || shortAddr(addr);
+
+  const handleTgLogin = (user) => {
+    // user = { id, first_name, last_name?, username?, photo_url?, auth_date, hash }
+    S.setTgUser(user);
+    setTgUser(user);
+    // Tell backend to associate this client_id with the TG user
+    backend(`/tg-login`, {
+      method: "POST",
+      body: JSON.stringify({
+        client_id: CLIENT_ID,
+        tg_auth: user,
+      }),
+    }).catch((e) => setError(`Login sync failed: ${e.message}`));
+  };
+  const handleTgLogout = () => {
+    S.setTgUser(null);
+    setTgUser(null);
+  }; // {key, label, ...} for chart modal
 
   // Look up round number for a given block number using the rounds map
   const blockToRound = (blockNumber) => {
@@ -563,12 +633,28 @@ function App() {
 
       {wallets.length > 0 && (
         <div className="wallets-bar">
-          {wallets.map(w => (
-            <div key={w} className={`wallet-chip ${w === activeAddr ? "active" : ""}`} onClick={() => switchWallet(w)}>
-              <span>{shortAddr(w)}</span>
-              <span className="x" onClick={(e) => removeWallet(w, e)}>✕</span>
-            </div>
-          ))}
+          {wallets.map(w => {
+            const nick = nicknames[w.toLowerCase()];
+            return (
+              <div key={w} className={`wallet-chip ${w === activeAddr ? "active" : ""}`} onClick={() => switchWallet(w)}>
+                {nick ? (
+                  <>
+                    <span className="nick">{nick}</span>
+                    <span className="sub-addr">{shortAddr(w)}</span>
+                  </>
+                ) : (
+                  <span>{shortAddr(w)}</span>
+                )}
+                <span className="edit" onClick={(e) => {
+                  e.stopPropagation();
+                  const current = nicknames[w.toLowerCase()] || "";
+                  const next = prompt(`Nickname for ${shortAddr(w)}:`, current);
+                  if (next !== null) updateNickname(w, next.trim());
+                }} title="Edit nickname">✎</span>
+                <span className="x" onClick={(e) => removeWallet(w, e)}>✕</span>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -584,6 +670,15 @@ function App() {
         <button className="btn-ghost" onClick={() => setShowNotifs(true)} disabled={!activeAddr}>
           🔔 Notifications {subscriptions.length > 0 ? `(${subscriptions.length})` : ""}
         </button>
+        {tgUser ? (
+          <div className="tg-user-badge">
+            {tgUser.photo_url && <img className="tg-user-avatar" src={tgUser.photo_url} alt="" />}
+            <span>✓ {tgUser.first_name}{tgUser.username ? ` (@${tgUser.username})` : ""}</span>
+            <span style={{cursor:"pointer",marginLeft:4,color:"var(--muted)"}} onClick={handleTgLogout} title="Log out">✕</span>
+          </div>
+        ) : (
+          <TelegramLoginButton onLogin={handleTgLogin} />
+        )}
       </div>
 
       {error && <div className="error-msg">⚠ {error}</div>}
@@ -772,6 +867,7 @@ function App() {
         <NotificationsModal
           wallet={activeAddr}
           subscriptions={subscriptions}
+          tgUser={tgUser}
           onClose={() => setShowNotifs(false)}
           onChange={() => backend(`/subscriptions?client_id=${CLIENT_ID}`).then(r => setSubscriptions(r.subscriptions || []))}
           setError={setError}
@@ -809,7 +905,7 @@ function SettingsModal({ onClose, onSave }) {
   );
 }
 
-function NotificationsModal({ wallet, subscriptions, onClose, onChange, setError, setSuccess }) {
+function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, setError, setSuccess }) {
   const [section, setSection] = useState("telegram"); // 'telegram' | 'browser'
   const [channel, setChannel] = useState("telegram");
   const [notify, setNotify] = useState({ reward_cut: true, fee_cut: true, missed_reward: true, claim_report: false });
@@ -854,6 +950,7 @@ function NotificationsModal({ wallet, subscriptions, onClose, onChange, setError
       setBusy(true);
       const body = {
         client_id: CLIENT_ID,
+        tg_user_id: tgUser?.id || null,
         wallet, channel,
         notify_reward_cut: notify.reward_cut,
         notify_fee_cut: notify.fee_cut,
@@ -1071,30 +1168,85 @@ function NotificationsModal({ wallet, subscriptions, onClose, onChange, setError
   );
 }
 
+// ─── Telegram Login Widget ────────────────────────────────────────────────────
+// IMPORTANT: requires you to run /setdomain in @BotFather and enter your
+// frontend domain (e.g. yourusername.github.io). Without that step,
+// the widget will refuse to render the button.
+function TelegramLoginButton({ onLogin }) {
+  const containerRef = useRef(null);
+  const [botUsername, setBotUsername] = useState(null);
+
+  // Fetch bot username from backend (so we don't have to hardcode it client-side)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        // Try to fetch from backend (uses our existing /telegram/link as it returns bot_username)
+        const r = await backend(`/telegram/link`, { method: "POST", body: "{}" });
+        if (!cancelled && r.bot_username) setBotUsername(r.bot_username);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!botUsername || !containerRef.current) return;
+    // Expose the callback globally so Telegram's widget can call it
+    window.onTelegramAuth = (user) => onLogin(user);
+    // Clear previous widget
+    containerRef.current.innerHTML = "";
+    const script = document.createElement("script");
+    script.async = true;
+    script.src = "https://telegram.org/js/telegram-widget.js?22";
+    script.setAttribute("data-telegram-login", botUsername);
+    script.setAttribute("data-size", "medium");
+    script.setAttribute("data-radius", "4");
+    script.setAttribute("data-onauth", "onTelegramAuth(user)");
+    script.setAttribute("data-request-access", "write");
+    containerRef.current.appendChild(script);
+  }, [botUsername, onLogin]);
+
+  if (!botUsername) {
+    return <span style={{color:"var(--muted)",fontSize:11}}>…</span>;
+  }
+  return <div ref={containerRef} style={{display:"inline-block"}} />;
+}
+
 // ─── Network Metrics Table ───────────────────────────────────────────────────
 function NetworkMetricsTable({ networkStats, treasuryLpt, lptPriceUsd, onSelectMetric }) {
   const [prevRound, setPrevRound] = useState(null);
   const [prevDay, setPrevDay] = useState(null);
+  const [todayDay, setTodayDay] = useState(null);
   const [sparks, setSparks] = useState({}); // metric_key -> array of {x, y}
 
-  // Fetch previous round and yesterday's totals for delta calc
+  // Fetch previous round, yesterday's totals, and today's totals
   useEffect(() => {
     (async () => {
       try {
-        // Get the previous round
         if (networkStats.latest_round) {
           const prevRoundId = Number(networkStats.latest_round) - 1;
           const r = await api(`/rounds/${prevRoundId}`).catch(() => null);
           if (r) setPrevRound(r);
         }
-        // Get yesterday's payout/reward summaries
+        const today = new Date();
         const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
-        const dateStr = yesterday.toISOString().slice(0, 10);
-        const [payRes, rewRes] = await Promise.all([
-          api(`/payouts/summary/daily/${dateStr}`).catch(() => null),
-          api(`/rewards/summary/daily/${dateStr}`).catch(() => null),
+        const todayStr = today.toISOString().slice(0, 10);
+        const yStr = yesterday.toISOString().slice(0, 10);
+        const [payToday, rewToday, payYest, rewYest] = await Promise.all([
+          api(`/payouts/summary/daily/${todayStr}`).catch(() => null),
+          api(`/rewards/summary/daily/${todayStr}`).catch(() => null),
+          api(`/payouts/summary/daily/${yStr}`).catch(() => null),
+          api(`/rewards/summary/daily/${yStr}`).catch(() => null),
         ]);
-        setPrevDay({ payouts: payRes?.sum_commission_usd, rewards: rewRes?.sum_total_tokens_usd });
+        // Use sum_face_value_usd for payouts (total gateway spend), not commission
+        setTodayDay({
+          payouts: payToday?.sum_face_value_usd,
+          rewards: rewToday?.sum_total_tokens_usd,
+        });
+        setPrevDay({
+          payouts: payYest?.sum_face_value_usd,
+          rewards: rewYest?.sum_total_tokens_usd,
+        });
       } catch (e) { console.warn("Prev period fetch failed:", e.message); }
     })();
   }, [networkStats.latest_round]);
@@ -1165,9 +1317,9 @@ function NetworkMetricsTable({ networkStats, treasuryLpt, lptPriceUsd, onSelectM
     {
       key: "payouts",
       label: "Payouts 24h",
-      value: Number(networkStats.payouts_usd_24h),
-      formatted: usd(networkStats.payouts_usd_24h),
-      prev: prevDay?.payouts ? Number(prevDay.payouts) : null,
+      value: todayDay?.payouts != null ? Number(todayDay.payouts) : Number(networkStats.payouts_usd_24h),
+      formatted: todayDay?.payouts != null ? usd(todayDay.payouts) : usd(networkStats.payouts_usd_24h),
+      prev: prevDay?.payouts != null ? Number(prevDay.payouts) : null,
       formatDelta: (d) => (d > 0 ? "+" : "") + "$" + d.toFixed(2),
       cls: "",
       spark_color: "var(--accent)",
@@ -1175,9 +1327,9 @@ function NetworkMetricsTable({ networkStats, treasuryLpt, lptPriceUsd, onSelectM
     {
       key: "rewards",
       label: "Rewards 24h",
-      value: Number(networkStats.rewards_usd_24h),
-      formatted: usd(networkStats.rewards_usd_24h),
-      prev: prevDay?.rewards ? Number(prevDay.rewards) : null,
+      value: todayDay?.rewards != null ? Number(todayDay.rewards) : Number(networkStats.rewards_usd_24h),
+      formatted: todayDay?.rewards != null ? usd(todayDay.rewards) : usd(networkStats.rewards_usd_24h),
+      prev: prevDay?.rewards != null ? Number(prevDay.rewards) : null,
       formatDelta: (d) => (d > 0 ? "+" : "") + "$" + d.toFixed(2),
       cls: "",
       spark_color: "var(--accent)",
@@ -1236,13 +1388,17 @@ function NetworkMetricsTable({ networkStats, treasuryLpt, lptPriceUsd, onSelectM
 
 // ─── Sparkline (small SVG line) ──────────────────────────────────────────────
 function Sparkline({ data, color = "var(--accent)", width = 100, height = 28 }) {
-  if (!data || data.length < 2) return <span style={{color:"var(--muted)",fontSize:10}}>—</span>;
-  const values = data.map(d => Number(d.y) || 0);
+  // Filter out invalid points
+  const clean = (data || []).filter(d => d && d.x != null && d.y != null && !isNaN(Number(d.y)));
+  if (clean.length === 0) return <span style={{color:"var(--muted)",fontSize:10}}>—</span>;
+  if (clean.length === 1) return <span style={{color:"var(--muted)",fontSize:10}}>1 point</span>;
+
+  const values = clean.map(d => Number(d.y));
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
-  const step = width / (data.length - 1);
-  const points = data.map((d, i) => {
+  const step = width / (clean.length - 1);
+  const points = clean.map((d, i) => {
     const x = i * step;
     const y = height - ((Number(d.y) - min) / range) * height;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
@@ -1273,12 +1429,19 @@ function MetricChartModal({ metric, lptPriceUsd, onClose }) {
         const from = new Date(); from.setDate(from.getDate() - rangeDays);
 
         if (metric.key === "total_stake" || metric.key === "active_orchs") {
-          const res = await api(`/rounds`, { limit: rangeDays });
-          const rounds = (res?.data || []).slice().reverse();
+          // Always fetch at least 30 rounds to ensure we have enough points
+          // (Rounds API ignores time bounds, just give us recent rounds)
+          const fetchLimit = Math.max(rangeDays, 30);
+          const res = await api(`/rounds`, { limit: fetchLimit });
+          const rounds = (res?.data || []).slice().reverse(); // oldest first
+          // Slice to requested range
+          const cutoff = from.getTime();
+          const filtered = rounds.filter(r => new Date(r.started_at).getTime() >= cutoff);
+          const finalRounds = filtered.length >= 2 ? filtered : rounds; // fallback to all
           if (metric.key === "total_stake") {
-            series = rounds.map(r => ({ x: r.started_at, y: Number(r.total_lpt_staked) }));
+            series = finalRounds.map(r => ({ x: r.started_at, y: Number(r.total_lpt_staked) }));
           } else {
-            series = rounds.map(r => ({ x: r.started_at, y: r.active_orchestrators }));
+            series = finalRounds.map(r => ({ x: r.started_at, y: r.active_orchestrators }));
           }
         } else if (metric.key === "payouts" || metric.key === "rewards") {
           const eventName = metric.key === "payouts" ? "WinningTicketRedeemed" : "Reward";
@@ -1343,7 +1506,11 @@ function MetricChartModal({ metric, lptPriceUsd, onClose }) {
         {loading && <div className="chart-empty"><span className="spinner" />Loading {range} chart…</div>}
         {error && <div className="error-msg">⚠ {error}</div>}
         {!loading && !error && data.length < 2 && (
-          <div className="chart-empty">Not enough data for {range} chart.</div>
+          <div className="chart-empty">
+            {metric.key === "treasury"
+              ? <>Treasury history is being collected once a day.<br />Check back tomorrow for the first chart.</>
+              : <>Not enough data points yet for the {range} chart.<br />Try a longer range or check back later.</>}
+          </div>
         )}
         {!loading && !error && data.length >= 2 && (
           <>
@@ -1375,7 +1542,11 @@ function LineChart({ data, formatVal, color = "var(--accent)" }) {
   const innerW = W - PAD_L - PAD_R;
   const innerH = H - PAD_T - PAD_B;
 
-  const values = data.map(d => Number(d.y) || 0);
+  // Filter out null/NaN points
+  const clean = (data || []).filter(d => d && d.x != null && d.y != null && !isNaN(Number(d.y)));
+  if (clean.length < 2) return <div className="chart-empty">Not enough data points to draw chart.</div>;
+
+  const values = clean.map(d => Number(d.y));
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
@@ -1384,8 +1555,8 @@ function LineChart({ data, formatVal, color = "var(--accent)" }) {
   const yMax = max + padding;
   const yRange = yMax - yMin || 1;
 
-  const xStep = innerW / (data.length - 1 || 1);
-  const points = data.map((d, i) => {
+  const xStep = innerW / (clean.length - 1 || 1);
+  const points = clean.map((d, i) => {
     const x = PAD_L + i * xStep;
     const y = PAD_T + innerH - ((Number(d.y) - yMin) / yRange) * innerH;
     return { x, y, dx: d.x, dy: Number(d.y) };
@@ -1401,11 +1572,13 @@ function LineChart({ data, formatVal, color = "var(--accent)" }) {
     return { value, y };
   });
 
-  // X-axis labels (5 evenly-spaced)
-  const xLabelCount = Math.min(5, data.length);
+  // X-axis labels (up to 5 evenly-spaced)
+  const xLabelCount = Math.min(5, clean.length);
   const xLabels = Array.from({ length: xLabelCount }, (_, i) => {
-    const idx = Math.floor((data.length - 1) * i / (xLabelCount - 1));
-    return { idx, x: PAD_L + idx * xStep, label: new Date(data[idx].x).toLocaleDateString(undefined, { day: "2-digit", month: "short" }) };
+    const idx = xLabelCount > 1
+      ? Math.floor((clean.length - 1) * i / (xLabelCount - 1))
+      : 0;
+    return { idx, x: PAD_L + idx * xStep, label: new Date(clean[idx].x).toLocaleDateString(undefined, { day: "2-digit", month: "short" }) };
   });
 
   const handleMove = (e) => {
