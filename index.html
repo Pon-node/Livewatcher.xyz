@@ -804,30 +804,36 @@ function App() {
                   <th style={{cursor:"pointer", userSelect:"none"}} onClick={() => setCutsSort(s => s === "desc" ? "asc" : "desc")}>
                     Date {cutsSort === "desc" ? "↓" : "↑"}
                   </th>
-                  <th>Reward Cut</th><th>Fee Cut</th><th>Fee Share</th><th>Round</th>
+                  <th>Reward Cut</th><th>Fee Cut</th><th>Fee Share</th>
                 </tr></thead>
                 <tbody>
                   {cutsHistory.length === 0
-                    ? <tr><td colSpan={5} style={{textAlign:"center",color:"var(--muted)",padding:24}}>No cut changes on record</td></tr>
+                    ? <tr><td colSpan={4} style={{textAlign:"center",color:"var(--muted)",padding:24}}>No cut changes on record</td></tr>
                     : (() => {
-                        // Always treat cutsHistory as DESC (newest first) for change-detection purposes
+                        // Sort by block_timestamp/block_number DESC first to ensure we have newest events
+                        const sortedDesc = cutsHistory.slice().sort((a, b) => {
+                          const ta = a.block_timestamp ? new Date(a.block_timestamp).getTime() : Number(a.block_number || 0);
+                          const tb = b.block_timestamp ? new Date(b.block_timestamp).getTime() : Number(b.block_number || 0);
+                          return tb - ta;
+                        });
+                        // Always take the 10 newest
+                        const top10Desc = sortedDesc.slice(0, 10);
+                        // Then apply user's preferred sort direction
                         const sortedForDisplay = cutsSort === "desc"
-                          ? cutsHistory.slice(0, 10)
-                          : cutsHistory.slice(0, 10).slice().reverse();
+                          ? top10Desc
+                          : top10Desc.slice().reverse();
                         return sortedForDisplay.map((c) => {
-                          // For change detection, always look at the chronologically-prior event in the original (desc) order
-                          const origIdx = cutsHistory.findIndex(x => x.event_id === c.event_id);
-                          const prev = cutsHistory[origIdx + 1];
+                          // For change detection, look at the chronologically-prior event in sorted (desc) array
+                          const origIdx = sortedDesc.findIndex(x => x.event_id === c.event_id);
+                          const prev = sortedDesc[origIdx + 1];
                           const rcChanged = prev && c.reward_cut_percent !== prev.reward_cut_percent;
                           const fcChanged = prev && c.fee_cut_percent !== prev.fee_cut_percent;
-                          const round = blockToRound(c.block_number);
                           return (
                             <tr key={c.event_id}>
                               <td>{fmtDate(c.block_timestamp)}</td>
                               <td className={rcChanged ? "changed-rc" : ""}>{pct(c.reward_cut_percent)}</td>
                               <td className={fcChanged ? "changed-rc" : ""}>{pct(c.fee_cut_percent)}</td>
                               <td>{pct(c.fee_share_percent)}</td>
-                              <td className="td-mono">{round != null ? round : <span style={{color:"var(--muted)"}}>—</span>}</td>
                             </tr>);
                         });
                       })()}
