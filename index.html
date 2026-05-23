@@ -299,14 +299,14 @@ async function getLptBalance(address) {
 async function backend(path, opts = {}) {
   const base = getBackend();
   if (!base) throw new Error("Backend URL not configured. Click ⚙ Settings to add it.");
-  const res = await fetch(`${base}${path}`, {
-    ...opts,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Client-Id": CLIENT_ID,
-      ...(opts.headers || {}),
-    },
-  });
+  const tgUser = S.getTgUser();
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Client-Id": CLIENT_ID,
+    ...(opts.headers || {}),
+  };
+  if (tgUser?.id) headers["X-Tg-User-Id"] = String(tgUser.id);
+  const res = await fetch(`${base}${path}`, { ...opts, headers });
   if (!res.ok) {
     let body = ""; try { body = (await res.json())?.error || ""; } catch {}
     throw new Error(`Backend ${res.status}: ${body || path}`);
@@ -439,23 +439,43 @@ function App() {
   };
   const displayNick = (addr) => nicknames[addr.toLowerCase()] || shortAddr(addr);
 
-  const handleTgLogin = (user) => {
+  const handleTgLogin = async (user) => {
     // user = { id, first_name, last_name?, username?, photo_url?, auth_date, hash }
     S.setTgUser(user);
     setTgUser(user);
-    // Tell backend to associate this client_id with the TG user
-    backend(`/tg-login`, {
-      method: "POST",
-      body: JSON.stringify({
-        client_id: CLIENT_ID,
-        tg_auth: user,
-      }),
-    }).catch((e) => setError(`Login sync failed: ${e.message}`));
+    try {
+      // Associate client_id with the TG user
+      await backend(`/tg-login`, {
+        method: "POST",
+        body: JSON.stringify({ client_id: CLIENT_ID, tg_auth: user }),
+      });
+      // Fetch this user's subs across all devices and merge wallets locally
+      const r = await backend(`/subscriptions?client_id=${CLIENT_ID}&tg_user_id=${user.id}`);
+      const subs = r.subscriptions || [];
+      setSubscriptions(subs);
+      if (subs.length > 0) {
+        const seen = new Set((S.getWallets() || []).map(w => w.toLowerCase()));
+        const merged = [...(S.getWallets() || [])];
+        for (const s of subs) {
+          const w = s.wallet.toLowerCase();
+          if (!seen.has(w)) { merged.push(w); seen.add(w); }
+        }
+        S.setWallets(merged);
+        setWallets(merged);
+        // If no active wallet, set the first one
+        if (!S.getActive() && merged.length > 0) {
+          S.setActive(merged[0]);
+          setActiveAddr(merged[0]);
+        }
+        setSuccess(`✓ Welcome back, ${user.first_name}! Loaded ${subs.length} subscription${subs.length !== 1 ? "s" : ""}.`);
+        setTimeout(() => setSuccess(null), 4000);
+      }
+    } catch (e) { setError(`Login sync failed: ${e.message}`); }
   };
   const handleTgLogout = () => {
     S.setTgUser(null);
     setTgUser(null);
-  }; // {key, label, ...} for chart modal
+  };
 
   // Look up round number for a given block number using the rounds map
   const blockToRound = (blockNumber) => {
@@ -566,13 +586,16 @@ function App() {
     return () => clearInterval(id);
   }, [activeAddr, fetchAll]);
 
-  // Load this client's subscriptions
+  // Load subscriptions (scoped to client_id + tg_user_id if logged in)
   useEffect(() => {
     if (!getBackend()) { setSubscriptions([]); return; }
-    backend(`/subscriptions?client_id=${CLIENT_ID}`)
+    const qs = tgUser?.id
+      ? `client_id=${CLIENT_ID}&tg_user_id=${tgUser.id}`
+      : `client_id=${CLIENT_ID}`;
+    backend(`/subscriptions?${qs}`)
       .then(r => setSubscriptions(r.subscriptions || []))
       .catch(() => setSubscriptions([]));
-  }, [showNotifs]);
+  }, [showNotifs, tgUser?.id]);
 
   const addWallet = () => {
     const t = walletInput.trim().toLowerCase();
@@ -875,7 +898,10 @@ function App() {
           subscriptions={subscriptions}
           tgUser={tgUser}
           onClose={() => setShowNotifs(false)}
-          onChange={() => backend(`/subscriptions?client_id=${CLIENT_ID}`).then(r => setSubscriptions(r.subscriptions || []))}
+          onChange={() => {
+            const qs = tgUser?.id ? `client_id=${CLIENT_ID}&tg_user_id=${tgUser.id}` : `client_id=${CLIENT_ID}`;
+            backend(`/subscriptions?${qs}`).then(r => setSubscriptions(r.subscriptions || []));
+          }}
           setError={setError}
           setSuccess={setSuccess}
         />
