@@ -315,12 +315,12 @@ async function backend(path, opts = {}) {
 }
 
 // ─── Formatting ──────────────────────────────────────────────────────────────
-function lpt(val) {
+function lpt(val, decimals) {
   if (val == null) return "—";
+  const d = decimals != null ? decimals : 4;
   const n = Number(val);
-  if (n === 0) return "0.0000 LPT";
-  if (n > 1e15) return (n / 1e18).toFixed(4) + " LPT";
-  return n.toFixed(4) + " LPT";
+  const value = n > 1e15 ? n / 1e18 : n;
+  return value.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }) + " LPT";
 }
 function eth(val) {
   if (val == null) return "—";
@@ -812,8 +812,8 @@ function App() {
                     : (() => {
                         // Always treat cutsHistory as DESC (newest first) for change-detection purposes
                         const sortedForDisplay = cutsSort === "desc"
-                          ? cutsHistory.slice(0, 15)
-                          : cutsHistory.slice(0, 15).slice().reverse();
+                          ? cutsHistory.slice(0, 10)
+                          : cutsHistory.slice(0, 10).slice().reverse();
                         return sortedForDisplay.map((c) => {
                           // For change detection, always look at the chronologically-prior event in the original (desc) order
                           const origIdx = cutsHistory.findIndex(x => x.event_id === c.event_id);
@@ -1228,26 +1228,33 @@ function NetworkMetricsTable({ networkStats, treasuryLpt, lptPriceUsd, onSelectM
           const r = await api(`/rounds/${prevRoundId}`).catch(() => null);
           if (r) setPrevRound(r);
         }
-        const today = new Date();
-        const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
-        const todayStr = today.toISOString().slice(0, 10);
-        const yStr = yesterday.toISOString().slice(0, 10);
-        const [payToday, rewToday, payYest, rewYest] = await Promise.all([
-          api(`/payouts/summary/daily/${todayStr}`).catch(() => null),
-          api(`/rewards/summary/daily/${todayStr}`).catch(() => null),
-          api(`/payouts/summary/daily/${yStr}`).catch(() => null),
-          api(`/rewards/summary/daily/${yStr}`).catch(() => null),
+        // For live payouts/rewards: use rolling 24h aggregation (sum face_value over last 24h)
+        // and the prior 24h for the delta.
+        const now = new Date();
+        const t0 = new Date(now.getTime() - 24 * 3600 * 1000);
+        const t1 = new Date(now.getTime() - 48 * 3600 * 1000);
+        const isoNow = now.toISOString();
+        const iso24 = t0.toISOString();
+        const iso48 = t1.toISOString();
+
+        const sumAgg = async (contract, eventName, from, to) => {
+          const res = await api(`/aggregations/events`, {
+            contract, event_name: eventName, bucket: "hour", metric: "sum_amount_usd",
+            from, to,
+          }).catch(() => null);
+          if (!res?.results) return null;
+          return res.results.reduce((acc, b) => acc + Number(b.value || 0), 0);
+        };
+
+        const [payNow, rewNow, payPrev, rewPrev] = await Promise.all([
+          sumAgg("TicketBroker", "WinningTicketRedeemed", iso24, isoNow),
+          sumAgg("BondingManager", "Reward", iso24, isoNow),
+          sumAgg("TicketBroker", "WinningTicketRedeemed", iso48, iso24),
+          sumAgg("BondingManager", "Reward", iso48, iso24),
         ]);
-        // Use sum_face_value_usd for payouts (total gateway spend), not commission
-        setTodayDay({
-          payouts: payToday?.sum_face_value_usd,
-          rewards: rewToday?.sum_total_tokens_usd,
-        });
-        setPrevDay({
-          payouts: payYest?.sum_face_value_usd,
-          rewards: rewYest?.sum_total_tokens_usd,
-        });
-      } catch (e) { console.warn("Prev period fetch failed:", e.message); }
+        setTodayDay({ payouts: payNow, rewards: rewNow });
+        setPrevDay({ payouts: payPrev, rewards: rewPrev });
+      } catch (e) { console.warn("Live 24h fetch failed:", e.message); }
     })();
   }, [networkStats.latest_round]);
 
@@ -1320,16 +1327,6 @@ function NetworkMetricsTable({ networkStats, treasuryLpt, lptPriceUsd, onSelectM
       value: todayDay?.payouts != null ? Number(todayDay.payouts) : Number(networkStats.payouts_usd_24h),
       formatted: todayDay?.payouts != null ? usd(todayDay.payouts) : usd(networkStats.payouts_usd_24h),
       prev: prevDay?.payouts != null ? Number(prevDay.payouts) : null,
-      formatDelta: (d) => (d > 0 ? "+" : "") + "$" + d.toFixed(2),
-      cls: "",
-      spark_color: "var(--accent)",
-    },
-    {
-      key: "rewards",
-      label: "Rewards 24h",
-      value: todayDay?.rewards != null ? Number(todayDay.rewards) : Number(networkStats.rewards_usd_24h),
-      formatted: todayDay?.rewards != null ? usd(todayDay.rewards) : usd(networkStats.rewards_usd_24h),
-      prev: prevDay?.rewards != null ? Number(prevDay.rewards) : null,
       formatDelta: (d) => (d > 0 ? "+" : "") + "$" + d.toFixed(2),
       cls: "",
       spark_color: "var(--accent)",
@@ -1482,7 +1479,7 @@ function MetricChartModal({ metric, lptPriceUsd, onClose }) {
   const formatVal = (v) => {
     if (isUsd) return usd(v);
     if (isLpt) return lpt(v, 0);
-    return fmtNumber(v, { maximumFractionDigits: 0 });
+    return Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 });
   };
 
   return (
