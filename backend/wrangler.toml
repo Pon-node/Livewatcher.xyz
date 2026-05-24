@@ -10,7 +10,7 @@ crons = ["*/30 * * * *"]
 # ───── Public vars ─────
 [vars]
 LIVEPEER_API_BASE = "https://livepeer-network-api.cloudspe.com/api/v1"
-TELEGRAM_BOT_USERNAME = "YourBotUsername"   # <-- replace with your bot's username (no @)
+TELEGRAM_BOT_USERNAME = "livewatch_alerts_bot"
 
 # ───── KV Namespaces ─────
 # Replace the placeholder IDs after running: wrangler kv namespace create <NAME>
