@@ -213,11 +213,59 @@
   .chart-stat-value { font-size: 14px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
   .chart-empty { padding: 80px 24px; text-align: center; color: var(--muted); font-size: 12px; }
 
+  @media (max-width: 768px) {
+    .chart-svg { height: 240px; }
+    .chart-modal { max-width: 100%; }
+    .metrics-table td:nth-child(4),
+    .metrics-table th:nth-child(4),
+    .metrics-table td:nth-child(5),
+    .metrics-table th:nth-child(5) { display: none; } /* hide sparkline + arrow on small screens */
+  }
+
   @media (max-width: 640px) {
+    .app { padding: 16px 14px 60px; }
     .row { flex-direction: column; }
-    .header { flex-direction: column; align-items: flex-start; }
+    .header { flex-direction: column; align-items: flex-start; gap: 8px; margin-bottom: 20px; padding-bottom: 16px; }
+    .logo { font-size: 22px; }
     .stats-grid { grid-template-columns: 1fr 1fr; }
-    .modal { padding: 20px; }
+    .stat-value { font-size: 17px; }
+
+    .search-wrap { flex-direction: column; gap: 8px; }
+    .search-wrap .btn { width: 100%; }
+
+    .controls-bar { gap: 6px; }
+    .controls-bar .btn-ghost { font-size: 10px; padding: 7px 10px; }
+
+    .orch-header { flex-wrap: wrap; gap: 12px; }
+    .orch-avatar { width: 44px; height: 44px; }
+    .orch-name { font-size: 15px; }
+
+    .modal-backdrop { padding: 0; align-items: flex-end; }
+    .modal { max-width: 100%; width: 100%; border-radius: 12px 12px 0 0; padding: 20px 16px; max-height: 92dvh; }
+    .chart-modal { max-height: 100dvh; border-radius: 0; }
+
+    .chart-svg { height: 200px; }
+    .chart-range-tabs { flex-wrap: wrap; gap: 2px; }
+    .chart-range-tab { padding: 5px 10px; font-size: 10px; }
+    .chart-current { font-size: 22px; }
+    .chart-stats { grid-template-columns: 1fr 1fr; }
+
+    .code-display .code { font-size: 26px; letter-spacing: 6px; }
+
+    .channel-tabs { overflow-x: auto; }
+    .channel-tab { padding: 10px 14px; font-size: 11px; white-space: nowrap; }
+
+    .metrics-table td:nth-child(3) { display: none; }
+    .metrics-table th:nth-child(3) { display: none; }
+    .metrics-table td { padding: 10px 8px; font-size: 12px; }
+    .metrics-table th { padding: 8px; }
+  }
+
+  @media (max-width: 400px) {
+    .stats-grid { grid-template-columns: 1fr; }
+    .wallet-chip { font-size: 10px; padding: 5px 10px; }
+    .controls-bar { flex-direction: column; align-items: stretch; }
+    .controls-bar .btn-ghost { text-align: center; }
   }
 </style>
 </head>
