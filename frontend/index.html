@@ -446,6 +446,7 @@ function App() {
   const [selectedMetric, setSelectedMetric] = useState(null);
   const [nicknames, setNicknames] = useState(S.getNicknames());
   const [tgUser, setTgUser] = useState(S.getTgUser());
+  const [showExport, setShowExport] = useState(false);
 
   const updateNickname = (addr, name) => {
     S.setNickname(addr, name);
@@ -665,6 +666,16 @@ function App() {
       setNetEcon(netE);
       setNetworkStats(netStats);
       setLastPoll(new Date());
+
+      // Update service worker with current wallet/orch for background PWA notifications
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.ready.then(reg => {
+          if (reg.active) reg.active.postMessage({
+            type: "UPDATE_WALLET", wallet: addr, orchAddr,
+            orchName: orch.display_name || orchAddr.slice(0, 10),
+          });
+        }).catch(() => {});
+      }
     } catch (e) { setError(e.message); }
     finally { setLoading(false); setProgress(""); }
   }, []);
@@ -782,6 +793,9 @@ function App() {
       <div className="controls-bar">
         <button className="btn-ghost" onClick={() => setShowNotifs(true)} disabled={!activeAddr}>
           🔔 Notifications {subscriptions.length > 0 ? `(${subscriptions.length})` : ""}
+        </button>
+        <button className="btn-ghost" onClick={() => setShowExport(true)} disabled={!orchestrator}>
+          ⬇ Export CSV
         </button>
         {tgUser ? (
           <div className="tg-user-badge">
@@ -1002,6 +1016,16 @@ function App() {
           metric={selectedMetric}
           lptPriceUsd={lptPriceUsd}
           onClose={() => setSelectedMetric(null)}
+        />
+      )}
+
+      {showExport && orchestrator && (
+        <ExportModal
+          wallet={activeAddr}
+          orchestrator={orchestrator}
+          activeDelegation={myDelegation}
+          cutsHistory={cutsHistory}
+          onClose={() => setShowExport(false)}
         />
       )}
     </div>
@@ -1278,8 +1302,9 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
                     </div>
                   </label>
                 </div>
-                <div style={{marginTop:12,fontSize:11,color:"var(--muted)",padding:12,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:4}}>
-                  💡 <strong>For mobile background notifications:</strong> use Telegram. Browser notifications only fire while the LiveWatch tab is open.
+                <div style={{marginTop:12,fontSize:11,color:"var(--muted)",padding:12,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:4,lineHeight:1.6}}>
+                  💡 <strong>Installed as PWA?</strong> Missed-reward checks run in the background even when the tab is closed (Android Chrome). On other platforms the tab must be open.<br/>
+                  <strong>Best for 24/7 background alerts:</strong> use Telegram.
                 </div>
               </div>
             )}
@@ -1339,9 +1364,12 @@ function NetworkMetricsTable({ networkStats, treasuryLpt, lptPriceUsd, onSelectM
   const [prevRound, setPrevRound] = useState(null);
   const [prevDay, setPrevDay] = useState(null);
   const [todayDay, setTodayDay] = useState(null);
-  const [sparks, setSparks] = useState({}); // metric_key -> array of {x, y}
+  const [sparks, setSparks] = useState({});
+  const [ethPriceUsd, setEthPriceUsd] = useState(null);
+  const [prevTreasuryLpt, setPrevTreasuryLpt] = useState(null);
 
-  // Fetch previous round, yesterday's totals, and today's totals
+  // Fetch previous round + live 24h payouts/rewards using native amounts × current price
+  // (USD valuations lag ~24h so sum_amount_usd returns 0 for recent events)
   useEffect(() => {
     (async () => {
       try {
@@ -1350,8 +1378,16 @@ function NetworkMetricsTable({ networkStats, treasuryLpt, lptPriceUsd, onSelectM
           const r = await api(`/rounds/${prevRoundId}`).catch(() => null);
           if (r) setPrevRound(r);
         }
-        // For live payouts/rewards: use rolling 24h aggregation (sum face_value over last 24h)
-        // and the prior 24h for the delta.
+
+        // Fetch current prices for ETH + LPT to convert native amounts → USD
+        const [ethPriceRes, lptPriceRes] = await Promise.all([
+          api(`/prices/ETH/USD/latest`).catch(() => null),
+          api(`/prices/LPT/USD/latest`).catch(() => null),
+        ]);
+        const ethPrice = ethPriceRes?.price ? Number(ethPriceRes.price) : null;
+        const lptPrice = lptPriceRes?.price ? Number(lptPriceRes.price) : (lptPriceUsd || null);
+        if (ethPrice) setEthPriceUsd(ethPrice);
+
         const now = new Date();
         const t0 = new Date(now.getTime() - 24 * 3600 * 1000);
         const t1 = new Date(now.getTime() - 48 * 3600 * 1000);
@@ -1359,68 +1395,75 @@ function NetworkMetricsTable({ networkStats, treasuryLpt, lptPriceUsd, onSelectM
         const iso24 = t0.toISOString();
         const iso48 = t1.toISOString();
 
-        const sumAgg = async (contract, eventName, from, to) => {
+        // Use sum_amount_native — USD valuations lag ~24h and return 0 for recent events
+        const sumNative = async (contract, eventName, from, to) => {
           const res = await api(`/aggregations/events`, {
-            contract, event_name: eventName, bucket: "hour", metric: "sum_amount_usd",
+            contract, event_name: eventName, bucket: "hour", metric: "sum_amount_native",
             from, to,
           }).catch(() => null);
           if (!res?.results) return null;
           return res.results.reduce((acc, b) => acc + Number(b.value || 0), 0);
         };
 
-        const [payNow, rewNow, payPrev, rewPrev] = await Promise.all([
-          sumAgg("TicketBroker", "WinningTicketRedeemed", iso24, isoNow),
-          sumAgg("BondingManager", "Reward", iso24, isoNow),
-          sumAgg("TicketBroker", "WinningTicketRedeemed", iso48, iso24),
-          sumAgg("BondingManager", "Reward", iso48, iso24),
+        const [payNowEth, rewNowLpt, payPrevEth, rewPrevLpt] = await Promise.all([
+          sumNative("TicketBroker", "WinningTicketRedeemed", iso24, isoNow),
+          sumNative("BondingManager", "Reward", iso24, isoNow),
+          sumNative("TicketBroker", "WinningTicketRedeemed", iso48, iso24),
+          sumNative("BondingManager", "Reward", iso48, iso24),
         ]);
-        setTodayDay({ payouts: payNow, rewards: rewNow });
-        setPrevDay({ payouts: payPrev, rewards: rewPrev });
+
+        // Convert to USD using live prices; fall back to raw ETH/LPT amount if no price
+        const toUsd = (native, price) => native != null && price != null ? native * price : native;
+        setTodayDay({ payouts: toUsd(payNowEth, ethPrice), payoutsNative: payNowEth,
+                      rewards: toUsd(rewNowLpt, lptPrice), rewardsNative: rewNowLpt });
+        setPrevDay({ payouts: toUsd(payPrevEth, ethPrice), rewards: toUsd(rewPrevLpt, lptPrice) });
       } catch (e) { console.warn("Live 24h fetch failed:", e.message); }
     })();
   }, [networkStats.latest_round]);
 
-  // Fetch sparkline data (30 days) for all metrics in parallel
+  // Fetch sparkline data (30 days) + previous treasury snapshot for delta
   useEffect(() => {
     (async () => {
       try {
-        // Rounds index for stake + active orchs (last 30 rounds)
         const roundsRes = await api(`/rounds`, { limit: 30 }).catch(() => null);
-        const rounds = (roundsRes?.data || []).slice().reverse(); // oldest -> newest
+        const rounds = (roundsRes?.data || []).slice().reverse();
 
-        // Aggregations for payouts and rewards (last 30 days, USD)
+        // Sparklines use historical sum_amount_usd (older events have valuations)
         const today = new Date();
         const from = new Date(); from.setDate(from.getDate() - 30);
-        const payAggr = await api(`/aggregations/events`, {
-          contract: "TicketBroker",
-          event_name: "WinningTicketRedeemed",
-          bucket: "day",
-          metric: "sum_amount_usd",
-          from: from.toISOString().slice(0, 10),
-          to: today.toISOString().slice(0, 10),
-        }).catch(() => null);
-        const rewAggr = await api(`/aggregations/events`, {
-          contract: "BondingManager",
-          event_name: "Reward",
-          bucket: "day",
-          metric: "sum_amount_usd",
-          from: from.toISOString().slice(0, 10),
-          to: today.toISOString().slice(0, 10),
-        }).catch(() => null);
+        const [payAggr, rewAggr, treasuryRes] = await Promise.all([
+          api(`/aggregations/events`, { contract: "TicketBroker", event_name: "WinningTicketRedeemed",
+            bucket: "day", metric: "sum_amount_usd",
+            from: from.toISOString().slice(0, 10), to: today.toISOString().slice(0, 10) }).catch(() => null),
+          api(`/aggregations/events`, { contract: "BondingManager", event_name: "Reward",
+            bucket: "day", metric: "sum_amount_usd",
+            from: from.toISOString().slice(0, 10), to: today.toISOString().slice(0, 10) }).catch(() => null),
+          backend(`/treasury/history?days=30`).catch(() => null),
+        ]);
 
-        // Treasury history from backend
-        const treasuryRes = await backend(`/treasury/history?days=30`).catch(() => null);
+        const treasuryHistory = treasuryRes?.history || [];
+        // Second-to-last entry = yesterday's balance for delta display
+        if (treasuryHistory.length >= 2) {
+          setPrevTreasuryLpt(treasuryHistory[treasuryHistory.length - 2].balance);
+        }
 
         setSparks({
           active_orchs: rounds.map(r => ({ x: r.started_at, y: r.active_orchestrators })),
           total_stake: rounds.map(r => ({ x: r.started_at, y: Number(r.total_lpt_staked) })),
           payouts: (payAggr?.results || []).map(b => ({ x: b.bucket_start, y: Number(b.value || 0) })),
           rewards: (rewAggr?.results || []).map(b => ({ x: b.bucket_start, y: Number(b.value || 0) })),
-          treasury: (treasuryRes?.history || []).map(t => ({ x: t.date, y: t.balance })),
+          treasury: treasuryHistory.map(t => ({ x: t.date, y: t.balance })),
         });
       } catch (e) { console.warn("Sparkline fetch failed:", e.message); }
     })();
   }, []);
+
+  // Format payouts label: show USD if available, fall back to ETH amount
+  const fmtPayouts = (val, nativeEth) => {
+    if (val != null && ethPriceUsd != null) return usd(val);
+    if (nativeEth != null) return nativeEth.toFixed(4) + " ETH";
+    return "—";
+  };
 
   const metrics = [
     {
@@ -1446,8 +1489,8 @@ function NetworkMetricsTable({ networkStats, treasuryLpt, lptPriceUsd, onSelectM
     {
       key: "payouts",
       label: "Payouts 24h",
-      value: todayDay?.payouts != null ? Number(todayDay.payouts) : Number(networkStats.payouts_usd_24h),
-      formatted: todayDay?.payouts != null ? usd(todayDay.payouts) : usd(networkStats.payouts_usd_24h),
+      value: todayDay?.payouts != null ? Number(todayDay.payouts) : null,
+      formatted: fmtPayouts(todayDay?.payouts, todayDay?.payoutsNative),
       prev: prevDay?.payouts != null ? Number(prevDay.payouts) : null,
       formatDelta: (d) => (d > 0 ? "+" : "") + "$" + d.toFixed(2),
       cls: "",
@@ -1460,8 +1503,8 @@ function NetworkMetricsTable({ networkStats, treasuryLpt, lptPriceUsd, onSelectM
       formatted: treasuryLpt != null
         ? lpt(treasuryLpt, 2) + (lptPriceUsd != null ? `  (~${usd(treasuryLpt * lptPriceUsd)})` : "")
         : "Loading…",
-      prev: null,
-      formatDelta: () => null,
+      prev: prevTreasuryLpt,
+      formatDelta: (d) => (d > 0 ? "+" : "") + d.toFixed(2) + " LPT",
       cls: "accent2",
       spark_color: "var(--accent2)",
     },
@@ -1752,6 +1795,221 @@ function LineChart({ data, formatVal, color = "var(--accent)" }) {
       )}
     </div>
   );
+}
+
+// ─── Export Modal ─────────────────────────────────────────────────────────────
+function ExportModal({ wallet, orchestrator, activeDelegation, cutsHistory, onClose }) {
+  const [period, setPeriod] = useState("90d");
+  const [fields, setFields] = useState({ rewards: true, cuts: true });
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [error, setError] = useState(null);
+
+  const orchAddr = orchestrator?.address;
+  const myStake = Number(activeDelegation?.bonded_principal || 0);
+  const totalStake = Number(orchestrator?.total_stake || 0);
+  const myShareFrac = totalStake > 0 ? myStake / totalStake : 0;
+
+  const periodMs = { "30d": 30, "90d": 90, "180d": 180, "1y": 365, "all": null }[period];
+  const fromDate = periodMs ? new Date(Date.now() - periodMs * 86400_000) : new Date(0);
+
+  const esc = (v) => {
+    const s = String(v ?? "");
+    return (s.includes(",") || s.includes('"') || s.includes("\n"))
+      ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+
+  const downloadCsv = (filename, rows) => {
+    const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+
+  const fetchAllRewardEvents = async (orchAddr, fromDate) => {
+    let cursor = null, all = [], page = 0;
+    do {
+      page++;
+      setProgress(`Fetching reward events… page ${page}`);
+      const params = { contract: "BondingManager", event_name: "Reward", address: orchAddr,
+        with_valuations: true, sort: "block_desc", limit: 100 };
+      if (cursor) params.cursor = cursor;
+      const res = await api(`/events`, params);
+      const batch = res.data || [];
+      all = [...all, ...batch];
+      cursor = res.next_cursor || null;
+      if (batch.length > 0 && new Date(batch[batch.length - 1].block_timestamp) < fromDate) break;
+    } while (cursor && all.length < 1000);
+    return all.filter(ev => new Date(ev.block_timestamp) >= fromDate);
+  };
+
+  const fetchBlockToRoundMap = async (orchAddr) => {
+    try {
+      const res = await api(`/orchestrators/${orchAddr}/stake-history`);
+      const sorted = (res.data || []).slice().sort((a, b) => Number(a.block_number) - Number(b.block_number));
+      return (blockNum) => {
+        const bn = Number(blockNum);
+        let round = null;
+        for (const s of sorted) { if (Number(s.block_number) <= bn) round = s.round; else break; }
+        return round;
+      };
+    } catch { return () => null; }
+  };
+
+  const handleExport = async () => {
+    if (!orchAddr) { setError("No orchestrator loaded."); return; }
+    setBusy(true); setError(null); setProgress("");
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const wShort = wallet.slice(0, 8);
+    try {
+      if (fields.rewards) {
+        const [events, blockToRound] = await Promise.all([
+          fetchAllRewardEvents(orchAddr, fromDate),
+          fetchBlockToRoundMap(orchAddr),
+        ]);
+        setProgress(`Building rewards CSV (${events.length} events)…`);
+
+        // cuts sorted ascending for historical cut lookup per block
+        const sortedCuts = [...cutsHistory].sort((a, b) => Number(a.block_number) - Number(b.block_number));
+        const cutAtBlock = (blockNum) => {
+          let cut = sortedCuts[0];
+          for (const c of sortedCuts) { if (Number(c.block_number) <= Number(blockNum)) cut = c; else break; }
+          return cut;
+        };
+
+        const header = ["Round","Date (UTC)","Block","Total LPT Minted",
+          "Orch Cut %","Orch Share LPT","Delegators Share LPT",
+          "Your Stake %","Your Share LPT",
+          "LPT Price USD","Total USD","Orch USD","Delegators USD","Your Share USD"].join(",");
+
+        const rows = [header];
+        for (const ev of [...events].reverse()) {
+          const round = blockToRound(ev.block_number) ?? "";
+          const date = new Date(ev.block_timestamp).toISOString().slice(0, 19).replace("T", " ");
+          const totalLpt = Number(ev.amount_native || 0);
+          const valuation = (ev.valuations || []).find(v => v.asset === "LPT");
+          const totalUsd = valuation ? Number(valuation.amount_usd || 0) : null;
+          const lptPrice = valuation ? Number(valuation.native_usd_price || 0) : null;
+          const cut = cutAtBlock(ev.block_number);
+          const rcPct = cut ? Number(cut.reward_cut_percent) : 0;
+          const rcFrac = rcPct / 100;
+          const orchLpt = totalLpt * rcFrac;
+          const delLpt = totalLpt - orchLpt;
+          const orchUsd = totalUsd != null ? totalUsd * rcFrac : null;
+          const delUsd = totalUsd != null ? totalUsd - orchUsd : null;
+          const myLpt = delLpt * myShareFrac;
+          const myUsd = delUsd != null ? delUsd * myShareFrac : null;
+          rows.push([
+            round, date, ev.block_number,
+            totalLpt.toFixed(6), rcPct.toFixed(2),
+            orchLpt.toFixed(6), delLpt.toFixed(6),
+            (myShareFrac * 100).toFixed(4), myLpt.toFixed(6),
+            lptPrice != null ? lptPrice.toFixed(4) : "",
+            totalUsd != null ? totalUsd.toFixed(2) : "",
+            orchUsd != null ? orchUsd.toFixed(2) : "",
+            delUsd != null ? delUsd.toFixed(2) : "",
+            myUsd != null ? myUsd.toFixed(4) : "",
+          ].map(esc).join(","));
+        }
+        downloadCsv(`livewatch_rewards_${wShort}_${dateStr}.csv`, rows);
+      }
+
+      if (fields.cuts) {
+        setProgress("Building cut history CSV…");
+        const filteredCuts = cutsHistory
+          .filter(c => new Date(c.block_timestamp) >= fromDate)
+          .slice().sort((a, b) => Number(a.block_number) - Number(b.block_number));
+        const rows = [
+          ["Date (UTC)","Block","Event ID","Reward Cut %","Fee Cut %","Fee Share %"].join(","),
+          ...filteredCuts.map(c => [
+            new Date(c.block_timestamp).toISOString().slice(0,19).replace("T"," "),
+            c.block_number, c.event_id,
+            Number(c.reward_cut_percent).toFixed(2),
+            Number(c.fee_cut_percent).toFixed(2),
+            Number(c.fee_share_percent).toFixed(2),
+          ].map(esc).join(","))
+        ];
+        downloadCsv(`livewatch_cuts_${wShort}_${dateStr}.csv`, rows);
+      }
+
+      setProgress(`Done. CSV download(s) started.`);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="modal-title">Export Data</div>
+        <div className="modal-subtitle">
+          Wallet <code style={{color:"var(--accent)"}}>{shortAddr(wallet)}</code> · Orch <code style={{color:"var(--accent2)"}}>{orchestrator?.display_name || shortAddr(orchAddr)}</code>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Time Period</label>
+          <div className="toggle-group" style={{flexWrap:"wrap"}}>
+            {[["30d","30d"],["90d","90d"],["180d","180d"],["1y","1 year"],["all","All time"]].map(([val, label]) => (
+              <button key={val} className={`toggle-opt ${period === val ? "active" : ""}`} onClick={() => setPeriod(val)}>{label}</button>
+            ))}
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Data to Export</label>
+          <div className="checkbox-group">
+            <label className="checkbox-item">
+              <input type="checkbox" checked={fields.rewards} onChange={e => setFields(f => ({...f, rewards: e.target.checked}))} />
+              <div className="ck-text">
+                <div className="ck-title">LPT Reward Events</div>
+                <div className="ck-desc">Per-round: total minted, orch share, delegators share, your estimated share, USD value at claim time. Round number included.</div>
+              </div>
+            </label>
+            <label className="checkbox-item">
+              <input type="checkbox" checked={fields.cuts} onChange={e => setFields(f => ({...f, cuts: e.target.checked}))} />
+              <div className="ck-text">
+                <div className="ck-title">Cut Change History</div>
+                <div className="ck-desc">All reward cut and fee cut changes with timestamps and block numbers.</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div style={{fontSize:11,color:"var(--muted)",marginBottom:20,padding:12,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:4,lineHeight:1.6}}>
+          💡 <strong>Your share</strong> is estimated proportionally (your bonded / total orch stake × delegators portion). Historical stake changes not accounted for — share fraction uses current snapshot.
+        </div>
+
+        {error && <div className="error-msg">⚠ {error}</div>}
+        {progress && !error && <div style={{fontSize:11,color:"var(--muted)",marginBottom:12}}><span className={busy ? "spinner" : ""} />{progress}</div>}
+
+        <button className="btn" style={{width:"100%"}} onClick={handleExport}
+          disabled={busy || (!fields.rewards && !fields.cuts)}>
+          {busy ? <><span className="spinner"/>Exporting…</> : "⬇ Download CSV"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Service Worker registration ──────────────────────────────────────────────
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").then(reg => {
+      // Register for periodic background sync if available (Chrome/Android PWA)
+      if ("periodicSync" in reg) {
+        navigator.permissions.query({ name: "periodic-background-sync" }).then(status => {
+          if (status.state === "granted") {
+            reg.periodicSync.register("lw-missed-reward", { minInterval: 15 * 60 * 1000 })
+              .catch(() => {});
+          }
+        }).catch(() => {});
+      }
+    }).catch(() => {});
+  });
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);

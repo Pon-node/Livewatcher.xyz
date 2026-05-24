@@ -324,37 +324,51 @@ async function checkSubscription(env, sub) {
     )[0];
     const orchAddr = activeDelegation.delegate_address;
 
-    const [orch, cutsRes, stakeRes, netStats] = await Promise.all([
+    // Fetch each endpoint independently so one failure doesn't kill all checks
+    const [orch, cutsRes, stakeRes] = await Promise.all([
       lp(env, `/orchestrators/${orchAddr}`),
-      lp(env, `/orchestrators/${orchAddr}/cuts-history`),
-      lp(env, `/orchestrators/${orchAddr}/stake-history`),
-      lp(env, `/network/stats`).catch(() => null),
+      lp(env, `/orchestrators/${orchAddr}/cuts-history`).catch(() => ({ data: [] })),
+      lp(env, `/orchestrators/${orchAddr}/stake-history`).catch(() => ({ data: [] })),
     ]);
 
+    // cuts-history is sorted ascending (oldest first); newest cut is the last element
     const cuts = cutsRes.data || [];
+    const latestCut = cuts.length > 0 ? cuts[cuts.length - 1] : null;
     const stakes = stakeRes.data || [];
     const prevSnap = (await env.SNAP.get(`snap:${sub.id}`, "json")) || {};
 
-    // Reward cut change
-    if (sub.notify_reward_cut && prevSnap.latest_cut_event_id && cuts.length > 0) {
-      if (cuts[0].event_id !== prevSnap.latest_cut_event_id &&
-          cuts[0].reward_cut_percent !== prevSnap.reward_cut_percent) {
-        const up = Number(cuts[0].reward_cut_percent) > Number(prevSnap.reward_cut_percent);
+    // Build block→round lookup from stake history (sorted ascending by block)
+    const sortedStakes = [...stakes].sort((a, b) => Number(a.block_number) - Number(b.block_number));
+    const blockToRound = (blockNum) => {
+      const bn = Number(blockNum);
+      let round = null;
+      for (const s of sortedStakes) {
+        if (Number(s.block_number) <= bn) round = s.round;
+        else break;
+      }
+      return round;
+    };
+
+    // Reward cut change — compare latest (last) cut event against snapshot
+    if (sub.notify_reward_cut && prevSnap.latest_cut_event_id && latestCut) {
+      if (latestCut.event_id !== prevSnap.latest_cut_event_id &&
+          latestCut.reward_cut_percent !== prevSnap.reward_cut_percent) {
+        const up = Number(latestCut.reward_cut_percent) > Number(prevSnap.reward_cut_percent);
         events.push({
           title: `${up ? "⚠️" : "✅"} Reward Cut ${up ? "Increased" : "Decreased"}`,
-          message: `Orchestrator \`${orch.display_name || orchAddr.slice(0, 10)}\` changed reward cut from **${Number(prevSnap.reward_cut_percent).toFixed(2)}%** → **${Number(cuts[0].reward_cut_percent).toFixed(2)}%**`,
+          message: `Orchestrator \`${orch.display_name || orchAddr.slice(0, 10)}\` changed reward cut from **${Number(prevSnap.reward_cut_percent).toFixed(2)}%** → **${Number(latestCut.reward_cut_percent).toFixed(2)}%**`,
         });
       }
     }
 
-    // Fee cut change
-    if (sub.notify_fee_cut && prevSnap.latest_cut_event_id && cuts.length > 0) {
-      if (cuts[0].event_id !== prevSnap.latest_cut_event_id &&
-          cuts[0].fee_cut_percent !== prevSnap.fee_cut_percent) {
-        const up = Number(cuts[0].fee_cut_percent) > Number(prevSnap.fee_cut_percent);
+    // Fee cut change — compare latest (last) cut event against snapshot
+    if (sub.notify_fee_cut && prevSnap.latest_cut_event_id && latestCut) {
+      if (latestCut.event_id !== prevSnap.latest_cut_event_id &&
+          latestCut.fee_cut_percent !== prevSnap.fee_cut_percent) {
+        const up = Number(latestCut.fee_cut_percent) > Number(prevSnap.fee_cut_percent);
         events.push({
           title: `${up ? "⚠️" : "✅"} Fee Cut ${up ? "Increased" : "Decreased"}`,
-          message: `Orchestrator \`${orch.display_name || orchAddr.slice(0, 10)}\` changed fee cut from **${Number(prevSnap.fee_cut_percent).toFixed(2)}%** → **${Number(cuts[0].fee_cut_percent).toFixed(2)}%**`,
+          message: `Orchestrator \`${orch.display_name || orchAddr.slice(0, 10)}\` changed fee cut from **${Number(prevSnap.fee_cut_percent).toFixed(2)}%** → **${Number(latestCut.fee_cut_percent).toFixed(2)}%**`,
         });
       }
     }
@@ -387,7 +401,7 @@ async function checkSubscription(env, sub) {
           // Only alert if round has been active for at least 1 hour (or we can't tell)
           if (roundAgeMs == null || roundAgeMs >= oneHourMs) {
             const lastAlertedAt = Number(prevSnap.last_missed_alert_at || 0);
-            const cooldownMs = 25 * 60 * 1000;
+            const cooldownMs = 35 * 60 * 1000; // > 30min cron interval to prevent same-round double-alert
             const lastAlertedRound = Number(prevSnap.last_missed_round || 0);
             const shouldAlert = lastAlertedRound !== onchainCurrentRound || (Date.now() - lastAlertedAt >= cooldownMs);
             if (shouldAlert) {
@@ -401,7 +415,7 @@ async function checkSubscription(env, sub) {
               prevSnap.last_missed_round = onchainCurrentRound;
             }
           }
-        } else if (prevSnap.last_missed_round && prevSnap.last_missed_round <= onchainCurrentRound) {
+        } else if (prevSnap.last_missed_round && prevSnap.last_missed_round < onchainCurrentRound) {
           // Orchestrator caught up — send resolution message and clear state
           events.push({
             title: "✅ Reward Claimed",
@@ -424,7 +438,7 @@ async function checkSubscription(env, sub) {
           event_name: "Reward",
           address: orchAddr,
           with_valuations: true,
-          sort: "block_number_desc",
+          sort: "block_desc",
           limit: 10,
         };
         const rewardEvents = await lp(env, `/events`, params);
@@ -448,7 +462,7 @@ async function checkSubscription(env, sub) {
             // Calculate split using the orchestrator's cut at that time
             // (We use current reward_cut_percent — a more accurate impl would
             // look up the cut effective at ev.block_number from cuts-history)
-            const rewardCutPct = Number(cuts[0]?.reward_cut_percent || 0);
+            const rewardCutPct = Number(latestCut?.reward_cut_percent || 0);
             const rewardCutFrac = rewardCutPct / 100;
 
             const orchShareLpt = totalLpt * rewardCutFrac;
@@ -464,8 +478,9 @@ async function checkSubscription(env, sub) {
             const myUsd = delegatorsShareUsd != null ? delegatorsShareUsd * myShareFrac : null;
 
             const date = new Date(ev.block_timestamp).toLocaleString();
+            const roundNum = blockToRound(ev.block_number);
             lines.push(
-              `🟢 *${date}*\n` +
+              `🟢 *Round ${roundNum ?? "?"}* · ${date}\n` +
               `Total minted: \`${totalLpt.toFixed(4)} LPT\`${totalUsd != null ? ` (~$${totalUsd.toFixed(2)})` : ""}\n` +
               `Orchestrator (${rewardCutPct.toFixed(2)}%): \`${orchShareLpt.toFixed(4)} LPT\`${orchShareUsd != null ? ` (~$${orchShareUsd.toFixed(2)})` : ""}\n` +
               `Delegators (${(100 - rewardCutPct).toFixed(2)}%): \`${delegatorsShareLpt.toFixed(4)} LPT\`${delegatorsShareUsd != null ? ` (~$${delegatorsShareUsd.toFixed(2)})` : ""}\n` +
@@ -489,14 +504,14 @@ async function checkSubscription(env, sub) {
       }
     }
 
-    // Update snapshot
+    // Update snapshot — store the latest (last) cut event since cuts-history is ascending
     await env.SNAP.put(`snap:${sub.id}`, JSON.stringify({
       ...prevSnap,
       orchestrator_address: orchAddr,
-      reward_cut_percent: cuts[0]?.reward_cut_percent,
-      fee_cut_percent: cuts[0]?.fee_cut_percent,
-      latest_cut_event_id: cuts[0]?.event_id,
-      latest_round_seen: stakes[0]?.round,
+      reward_cut_percent: latestCut?.reward_cut_percent,
+      fee_cut_percent: latestCut?.fee_cut_percent,
+      latest_cut_event_id: latestCut?.event_id,
+      latest_round_seen: stakes[stakes.length - 1]?.round,
       checked_at: Date.now(),
     }));
   } catch (e) {
@@ -908,6 +923,57 @@ async function handleRequest(request, env) {
       return json({ history: refreshed });
     }
     return json({ history });
+  }
+
+  // POST /debug/trigger?sub_id=... — manually run check for one sub (or all) without waiting for cron
+  // Also accepts ?wallet=... to look up by wallet address
+  if (method === "POST" && path === "/debug/trigger") {
+    const subId = url.searchParams.get("sub_id");
+    const wallet = url.searchParams.get("wallet");
+    let subs = [];
+    if (subId) {
+      const sub = await env.SUBS.get(`sub:${subId}`, "json");
+      if (!sub) return err("Subscription not found", 404);
+      subs = [sub];
+    } else if (wallet) {
+      const all = await listAllSubs(env);
+      subs = all.filter(s => s.wallet === wallet.toLowerCase());
+      if (subs.length === 0) return err("No subscriptions for that wallet", 404);
+    } else {
+      return err("Provide sub_id or wallet param");
+    }
+    const results = [];
+    for (const sub of subs) {
+      const events = await checkSubscription(env, sub);
+      const dispatched = [];
+      for (const ev of events) {
+        const ok = await dispatch(env, sub, ev.title, ev.message);
+        dispatched.push({ title: ev.title, sent: ok });
+      }
+      results.push({ sub_id: sub.id, wallet: sub.wallet, events_found: events.length, dispatched });
+    }
+    return json({ ok: true, results });
+  }
+
+  // GET /debug/snap?sub_id=... — inspect stored snapshot for a subscription
+  if (method === "GET" && path === "/debug/snap") {
+    const subId = url.searchParams.get("sub_id");
+    const wallet = url.searchParams.get("wallet");
+    if (subId) {
+      const snap = await env.SNAP.get(`snap:${subId}`, "json");
+      const sub = await env.SUBS.get(`sub:${subId}`, "json");
+      return json({ sub, snap });
+    } else if (wallet) {
+      const all = await listAllSubs(env);
+      const subs = all.filter(s => s.wallet === wallet.toLowerCase());
+      const out = [];
+      for (const sub of subs) {
+        const snap = await env.SNAP.get(`snap:${sub.id}`, "json");
+        out.push({ sub, snap });
+      }
+      return json({ results: out });
+    }
+    return err("Provide sub_id or wallet param");
   }
 
   if (path === "/" || path === "/health") return json({ status: "ok", service: "livewatch-backend" });

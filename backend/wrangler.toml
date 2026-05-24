@@ -16,15 +16,15 @@ TELEGRAM_BOT_USERNAME = "YourBotUsername"   # <-- replace with your bot's userna
 # Replace the placeholder IDs after running: wrangler kv namespace create <NAME>
 [[kv_namespaces]]
 binding = "SUBS"
-id = "REPLACE_WITH_SUBS_NAMESPACE_ID"
+id = "7ee612e7501e4e1a8c2ce9753f46d2f3"
 
 [[kv_namespaces]]
 binding = "SNAP"
-id = "REPLACE_WITH_SNAP_NAMESPACE_ID"
+id = "9b92e2bd8f5746ed988f78c28e5d5ad4"
 
 [[kv_namespaces]]
 binding = "CODES"
-id = "REPLACE_WITH_CODES_NAMESPACE_ID"
+id = "9cccd98c1c7847c9aa7cae2d220e97d3"
 
 # ───── Secrets (set via CLI, NOT here) ─────
 # Run: wrangler secret put TELEGRAM_BOT_TOKEN
