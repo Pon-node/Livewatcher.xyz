@@ -794,7 +794,7 @@ function App() {
         <button className="btn-ghost" onClick={() => setShowNotifs(true)} disabled={!activeAddr}>
           🔔 Notifications {subscriptions.length > 0 ? `(${subscriptions.length})` : ""}
         </button>
-        <button className="btn-ghost" onClick={() => setShowExport(true)} disabled={!orchestrator}>
+        <button className="btn-ghost" onClick={() => { if (orchestrator) setShowExport(true); else setError("Load a wallet first to export data."); }}>
           ⬇ Export CSV
         </button>
         {tgUser ? (
@@ -1388,35 +1388,32 @@ function NetworkMetricsTable({ networkStats, treasuryLpt, lptPriceUsd, onSelectM
         const lptPrice = lptPriceRes?.price ? Number(lptPriceRes.price) : (lptPriceUsd || null);
         if (ethPrice) setEthPriceUsd(ethPrice);
 
-        const now = new Date();
-        const t0 = new Date(now.getTime() - 24 * 3600 * 1000);
-        const t1 = new Date(now.getTime() - 48 * 3600 * 1000);
-        const isoNow = now.toISOString();
-        const iso24 = t0.toISOString();
-        const iso48 = t1.toISOString();
+        // API requires bucket=day + YYYY-MM-DD — bucket=hour with ISO timestamps returns 0
+        const today     = new Date().toISOString().slice(0, 10);
+        const yesterday = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
+        const tomorrow  = new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
+        const dayBefore = new Date(Date.now() - 2 * 86400_000).toISOString().slice(0, 10);
 
-        // Use sum_amount_native — USD valuations lag ~24h and return 0 for recent events
-        const sumNative = async (contract, eventName, from, to) => {
+        const sumDay = async (contract, eventName, from, to) => {
           const res = await api(`/aggregations/events`, {
-            contract, event_name: eventName, bucket: "hour", metric: "sum_amount_native",
+            contract, event_name: eventName, bucket: "day", metric: "sum_amount_native",
             from, to,
           }).catch(() => null);
           if (!res?.results) return null;
           return res.results.reduce((acc, b) => acc + Number(b.value || 0), 0);
         };
 
-        const [payNowEth, rewNowLpt, payPrevEth, rewPrevLpt] = await Promise.all([
-          sumNative("TicketBroker", "WinningTicketRedeemed", iso24, isoNow),
-          sumNative("BondingManager", "Reward", iso24, isoNow),
-          sumNative("TicketBroker", "WinningTicketRedeemed", iso48, iso24),
-          sumNative("BondingManager", "Reward", iso48, iso24),
+        const [payTodayEth, rewTodayLpt, payYestEth, rewYestLpt] = await Promise.all([
+          sumDay("TicketBroker", "WinningTicketRedeemed", today, tomorrow),
+          sumDay("BondingManager", "Reward", today, tomorrow),
+          sumDay("TicketBroker", "WinningTicketRedeemed", yesterday, today),
+          sumDay("BondingManager", "Reward", yesterday, today),
         ]);
 
-        // Convert to USD using live prices; fall back to raw ETH/LPT amount if no price
         const toUsd = (native, price) => native != null && price != null ? native * price : native;
-        setTodayDay({ payouts: toUsd(payNowEth, ethPrice), payoutsNative: payNowEth,
-                      rewards: toUsd(rewNowLpt, lptPrice), rewardsNative: rewNowLpt });
-        setPrevDay({ payouts: toUsd(payPrevEth, ethPrice), rewards: toUsd(rewPrevLpt, lptPrice) });
+        setTodayDay({ payouts: toUsd(payTodayEth, ethPrice), payoutsNative: payTodayEth,
+                      rewards: toUsd(rewTodayLpt, lptPrice), rewardsNative: rewTodayLpt });
+        setPrevDay({ payouts: toUsd(payYestEth, ethPrice), rewards: toUsd(rewYestLpt, lptPrice) });
       } catch (e) { console.warn("Live 24h fetch failed:", e.message); }
     })();
   }, [networkStats.latest_round]);
@@ -1488,7 +1485,7 @@ function NetworkMetricsTable({ networkStats, treasuryLpt, lptPriceUsd, onSelectM
     },
     {
       key: "payouts",
-      label: "Payouts 24h",
+      label: "Payouts Today",
       value: todayDay?.payouts != null ? Number(todayDay.payouts) : null,
       formatted: fmtPayouts(todayDay?.payouts, todayDay?.payoutsNative),
       prev: prevDay?.payouts != null ? Number(prevDay.payouts) : null,
