@@ -1,0 +1,24 @@
+{
+  "name": "LiveWatch — Livepeer Delegator Monitor",
+  "short_name": "LiveWatch",
+  "description": "Monitor Livepeer delegations, get alerts on reward cut changes, fee cut changes, missed rewards, and round claim reports.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#050a0e",
+  "theme_color": "#00e5a0",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%23050a0e'/%3E%3Ccircle cx='96' cy='96' r='40' fill='%2300e5a0'/%3E%3Ctext x='96' y='160' font-family='monospace' font-size='18' fill='%2300e5a0' text-anchor='middle' font-weight='700'%3ELW%3C/text%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' fill='%23050a0e'/%3E%3Ccircle cx='256' cy='256' r='100' fill='%2300e5a0'/%3E%3Ctext x='256' y='430' font-family='monospace' font-size='48' fill='%2300e5a0' text-anchor='middle' font-weight='700'%3ELW%3C/text%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

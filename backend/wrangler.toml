@@ -1,0 +1,30 @@
+name = "livewatch-backend"
+main = "worker.js"
+compatibility_date = "2024-12-01"
+
+# ───── Cron Trigger ─────
+# Runs every 30 minutes
+[triggers]
+crons = ["*/30 * * * *"]
+
+# ───── Public vars ─────
+[vars]
+LIVEPEER_API_BASE = "https://livepeer-network-api.cloudspe.com/api/v1"
+TELEGRAM_BOT_USERNAME = "YourBotUsername"   # <-- replace with your bot's username (no @)
+
+# ───── KV Namespaces ─────
+# Replace the placeholder IDs after running: wrangler kv namespace create <NAME>
+[[kv_namespaces]]
+binding = "SUBS"
+id = "REPLACE_WITH_SUBS_NAMESPACE_ID"
+
+[[kv_namespaces]]
+binding = "SNAP"
+id = "REPLACE_WITH_SNAP_NAMESPACE_ID"
+
+[[kv_namespaces]]
+binding = "CODES"
+id = "REPLACE_WITH_CODES_NAMESPACE_ID"
+
+# ───── Secrets (set via CLI, NOT here) ─────
+# Run: wrangler secret put TELEGRAM_BOT_TOKEN

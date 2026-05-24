@@ -1,0 +1,1760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#00e5a0" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="LiveWatch" />
+<link rel="manifest" href="manifest.json" />
+<title>LiveWatch · Livepeer Delegator Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #050a0e; --surface: #0c1419; --border: #1a2830; --border2: #243540;
+    --text: #e8f4f0; --muted: #4a7a8a; --accent: #00e5a0; --accent2: #00b8ff;
+    --warn: #ff6b35; --danger: #ff3b5c;
+    --font-display: 'Syne', sans-serif; --font-mono: 'IBM Plex Mono', monospace;
+  }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-mono); min-height: 100vh; overflow-x: hidden; }
+  body::before {
+    content: ''; position: fixed; inset: 0;
+    background-image: linear-gradient(rgba(0,229,160,.03) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(0,229,160,.03) 1px, transparent 1px);
+    background-size: 40px 40px; pointer-events: none; z-index: 0;
+  }
+  #root { position: relative; z-index: 1; }
+  .app { max-width: 1100px; margin: 0 auto; padding: 32px 24px 80px; }
+
+  .header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid var(--border); gap: 16px; flex-wrap: wrap; }
+  .logo { font-family: var(--font-display); font-size: 28px; font-weight: 800; letter-spacing: -0.5px; }
+  .logo span { color: var(--accent); }
+  .logo small { display: block; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; margin-top: 2px; }
+  .live-dot { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); letter-spacing: 1px; }
+  .live-dot .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; flex-shrink: 0; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.8)} }
+
+  .wallets-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+  .wallet-chip { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border2); border-radius: 20px; padding: 6px 14px; font-size: 11px; cursor: pointer; transition: all .15s; }
+  .wallet-chip:hover { border-color: var(--accent); }
+  .wallet-chip.active { background: rgba(0,229,160,.12); border-color: var(--accent); color: var(--accent); }
+  .wallet-chip .x { color: var(--muted); padding-left: 4px; border-left: 1px solid var(--border2); margin-left: 4px; }
+  .wallet-chip .x:hover { color: var(--danger); }
+  .wallet-chip .edit { color: var(--muted); padding: 0 2px; font-size: 10px; }
+  .wallet-chip .edit:hover { color: var(--accent); }
+  .wallet-chip .nick { font-weight: 600; }
+  .wallet-chip .sub-addr { color: var(--muted); font-size: 10px; margin-left: 4px; }
+
+  /* TG login button (looks like the official Telegram widget) */
+  .tg-login-btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #2AABEE; color: #fff; border: none; border-radius: 4px;
+    padding: 10px 16px; font-family: var(--font-mono); font-size: 12px;
+    font-weight: 600; cursor: pointer; transition: opacity .2s;
+  }
+  .tg-login-btn:hover { opacity: 0.9; }
+  .tg-login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .tg-user-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(0,229,160,0.1); color: var(--accent);
+    padding: 6px 12px; border: 1px solid rgba(0,229,160,0.3);
+    border-radius: 20px; font-size: 11px;
+  }
+  .tg-user-avatar { width: 20px; height: 20px; border-radius: 50%; }
+
+  .search-wrap { display: flex; gap: 12px; margin-bottom: 16px; }
+  .search-input { flex: 1; background: var(--surface); border: 1px solid var(--border2); border-radius: 4px; padding: 14px 18px; font-family: var(--font-mono); font-size: 13px; color: var(--text); outline: none; transition: border-color .2s; min-width: 0; }
+  .search-input::placeholder { color: var(--muted); }
+  .search-input:focus { border-color: var(--accent); }
+
+  .btn { background: var(--accent); color: var(--bg); border: none; border-radius: 4px; padding: 14px 28px; font-family: var(--font-display); font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; transition: opacity .2s, transform .1s; white-space: nowrap; }
+  .btn:hover { opacity: .85; }
+  .btn:active { transform: scale(.98); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-ghost { background: transparent; border: 1px solid var(--border2); color: var(--muted); font-family: var(--font-mono); font-size: 11px; padding: 8px 14px; border-radius: 3px; cursor: pointer; transition: border-color .2s, color .2s; white-space: nowrap; }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-ghost.danger:hover { border-color: var(--danger); color: var(--danger); }
+
+  .controls-bar { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 24px; margin-bottom: 20px; }
+  .card-title { font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: var(--muted); margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .badge { font-size: 10px; padding: 3px 8px; border-radius: 2px; letter-spacing: 1px; }
+  .badge-active { background: rgba(0,229,160,.15); color: var(--accent); }
+  .badge-soon { background: rgba(0,184,255,.15); color: var(--accent2); }
+
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; margin-bottom: 20px; }
+  .stat { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 16px; }
+  .stat-label { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+  .stat-value { font-size: 20px; font-weight: 600; color: var(--text); word-break: break-all; }
+  .stat-value.accent { color: var(--accent); }
+  .stat-value.accent2 { color: var(--accent2); }
+  .stat-value.warn { color: var(--warn); }
+  .stat-sub { font-size: 10px; color: var(--muted); margin-top: 4px; }
+
+  .alerts-list { display: flex; flex-direction: column; gap: 10px; }
+  .alert-item { display: flex; align-items: flex-start; gap: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 12px 16px; }
+  .alert-item.warn { border-left: 3px solid var(--warn); }
+  .alert-item.good { border-left: 3px solid var(--accent); }
+  .alert-icon { font-size: 16px; line-height: 1; margin-top: 1px; }
+  .alert-body { flex: 1; }
+  .alert-msg { font-size: 12px; color: var(--text); line-height: 1.5; }
+  .alert-time { font-size: 10px; color: var(--muted); margin-top: 3px; }
+  .alert-dismiss { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 0; }
+  .no-alerts { text-align: center; padding: 28px; color: var(--muted); font-size: 12px; letter-spacing: 1px; }
+
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); padding: 8px 12px; border-bottom: 1px solid var(--border); font-weight: 500; }
+  td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,.02); }
+  .changed-rc { color: var(--warn); }
+  .changed-rc::after { content: ' ▲'; font-size: 8px; }
+  .td-mono { font-family: var(--font-mono); }
+
+  .orch-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; padding: 16px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+  .orch-avatar { width: 56px; height: 56px; border-radius: 50%; background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%); flex-shrink: 0; object-fit: cover; }
+  .orch-info { flex: 1; min-width: 0; }
+  .orch-name { font-family: var(--font-display); font-size: 18px; font-weight: 700; color: var(--text); }
+  .orch-addr { font-family: var(--font-mono); font-size: 11px; color: var(--accent2); word-break: break-all; margin-top: 4px; }
+
+  .row { display: flex; gap: 20px; }
+  .row > * { flex: 1; }
+
+  .empty { text-align: center; padding: 60px 24px; color: var(--muted); }
+  .empty h2 { font-family: var(--font-display); font-size: 18px; font-weight: 700; margin-bottom: 8px; color: var(--text); }
+  .empty p { font-size: 12px; line-height: 1.7; }
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border2); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 8px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error-msg { background: rgba(255,59,92,.1); border: 1px solid rgba(255,59,92,.3); border-radius: 4px; padding: 12px 16px; font-size: 11px; color: var(--danger); margin-bottom: 20px; white-space: pre-wrap; font-family: var(--font-mono); line-height: 1.6; }
+  .footer-note { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border); font-size: 10px; color: var(--muted); text-align: center; letter-spacing: 1px; line-height: 1.7; }
+
+  .toggle-group { display: flex; gap: 4px; background: var(--bg); padding: 4px; border-radius: 4px; width: fit-content; border: 1px solid var(--border); }
+  .toggle-opt { padding: 6px 14px; border-radius: 3px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; background: none; border: none; color: var(--muted); font-family: var(--font-mono); transition: background .15s, color .15s; }
+  .toggle-opt.active { background: var(--accent); color: var(--bg); font-weight: 600; }
+
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .modal { background: var(--surface); border: 1px solid var(--border2); border-radius: 8px; max-width: 600px; width: 100%; max-height: 90vh; overflow-y: auto; padding: 32px; }
+  .modal-close { float: right; background: none; border: none; color: var(--muted); font-size: 24px; cursor: pointer; line-height: 1; }
+  .modal-title { font-family: var(--font-display); font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+  .modal-subtitle { font-size: 12px; color: var(--muted); margin-bottom: 24px; line-height: 1.6; }
+
+  .channel-tabs { display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+  .channel-tab { padding: 12px 20px; cursor: pointer; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); background: none; border: none; border-bottom: 2px solid transparent; font-family: var(--font-mono); transition: all .2s; display: flex; align-items: center; gap: 8px; }
+  .channel-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .channel-tab.disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .form-group { margin-bottom: 20px; }
+  .form-label { display: block; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+  .form-input { width: 100%; background: var(--bg); border: 1px solid var(--border2); border-radius: 4px; padding: 12px 14px; color: var(--text); font-family: var(--font-mono); font-size: 12px; outline: none; transition: border-color .2s; }
+  .form-input:focus { border-color: var(--accent); }
+  .form-help { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.6; }
+  .form-help a { color: var(--accent2); text-decoration: none; }
+
+  .checkbox-group { display: flex; flex-direction: column; gap: 12px; }
+  .checkbox-item { display: flex; align-items: flex-start; gap: 12px; cursor: pointer; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; transition: border-color .15s; }
+  .checkbox-item:hover { border-color: var(--accent); }
+  .checkbox-item input { margin-top: 2px; accent-color: var(--accent); cursor: pointer; }
+  .checkbox-item .ck-text { flex: 1; }
+  .checkbox-item .ck-title { font-size: 13px; font-weight: 600; color: var(--text); }
+  .checkbox-item .ck-desc { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+
+  .code-display { background: var(--bg); border: 2px solid var(--accent); border-radius: 4px; padding: 24px; text-align: center; margin: 20px 0; }
+  .code-display .code { font-family: var(--font-mono); font-size: 36px; font-weight: 700; color: var(--accent); letter-spacing: 12px; }
+  .code-display .code-help { font-size: 11px; color: var(--muted); margin-top: 12px; line-height: 1.6; }
+
+  .sub-item { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; margin-bottom: 8px; }
+  .sub-channel-icon { font-size: 20px; }
+  .sub-info { flex: 1; min-width: 0; }
+  .sub-title { font-size: 12px; color: var(--text); }
+  .sub-meta { font-size: 10px; color: var(--muted); margin-top: 3px; word-break: break-all; }
+
+  /* Network metrics table */
+  .metrics-table { width: 100%; border-collapse: collapse; }
+  .metrics-table tr { cursor: pointer; transition: background 0.15s; }
+  .metrics-table tbody tr:hover { background: rgba(0,229,160,0.04); }
+  .metrics-table th { text-align: left; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); padding: 10px 14px; border-bottom: 1px solid var(--border); font-weight: 500; }
+  .metrics-table td { padding: 14px; border-bottom: 1px solid var(--border); vertical-align: middle; font-size: 13px; }
+  .metrics-table tr:last-child td { border-bottom: none; }
+  .metric-label { color: var(--text); font-weight: 500; }
+  .metric-value { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .metric-value.accent { color: var(--accent); }
+  .metric-value.accent2 { color: var(--accent2); }
+  .metric-delta { font-size: 11px; padding: 2px 8px; border-radius: 3px; display: inline-block; font-variant-numeric: tabular-nums; }
+  .metric-delta.up { background: rgba(0,229,160,0.12); color: var(--accent); }
+  .metric-delta.down { background: rgba(255,59,92,0.12); color: var(--danger); }
+  .metric-delta.flat { background: rgba(255,255,255,0.04); color: var(--muted); }
+  .metric-spark { display: inline-block; vertical-align: middle; }
+  .metric-arrow { font-size: 11px; color: var(--muted); margin-left: 8px; }
+
+  /* Chart modal */
+  .chart-modal { max-width: 900px; }
+  .chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; gap: 12px; flex-wrap: wrap; }
+  .chart-current { font-size: 28px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .chart-current.accent2 { color: var(--accent2); }
+  .chart-current-label { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+  .chart-range-tabs { display: flex; gap: 4px; background: var(--bg); padding: 4px; border-radius: 4px; border: 1px solid var(--border); }
+  .chart-range-tab { padding: 6px 14px; border-radius: 3px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; background: none; border: none; color: var(--muted); font-family: var(--font-mono); transition: all .15s; }
+  .chart-range-tab.active { background: var(--accent); color: var(--bg); font-weight: 600; }
+  .chart-svg { width: 100%; height: 320px; }
+  .chart-grid-line { stroke: var(--border); stroke-width: 1; }
+  .chart-axis-label { fill: var(--muted); font-size: 10px; font-family: var(--font-mono); }
+  .chart-line { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .chart-line.accent2 { stroke: var(--accent2); }
+  .chart-area { opacity: 0.15; }
+  .chart-tooltip { position: absolute; background: var(--bg); border: 1px solid var(--accent); border-radius: 4px; padding: 8px 12px; font-size: 11px; pointer-events: none; white-space: nowrap; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+  .chart-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .chart-stat-label { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+  .chart-stat-value { font-size: 14px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+  .chart-empty { padding: 80px 24px; text-align: center; color: var(--muted); font-size: 12px; }
+
+  @media (max-width: 640px) {
+    .row { flex-direction: column; }
+    .header { flex-direction: column; align-items: flex-start; }
+    .stats-grid { grid-template-columns: 1fr 1fr; }
+    .modal { padding: 20px; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback, useRef } = React;
+
+// ─── Config ──────────────────────────────────────────────────────────────────
+const API_BASE = "https://livepeer-network-api.cloudspe.com/api/v1";
+const POLL_INTERVAL = 60_000;
+
+// Each browser gets a permanent UUID on first load - used to scope subscriptions
+function getOrCreateClientId() {
+  let cid = localStorage.getItem("lw_client_id");
+  if (!cid) {
+    cid = crypto.randomUUID();
+    localStorage.setItem("lw_client_id", cid);
+  }
+  return cid;
+}
+const CLIENT_ID = getOrCreateClientId();
+
+// ─── API clients ─────────────────────────────────────────────────────────────
+async function api(path, params = {}) {
+  const qs = Object.entries(params)
+    .filter(([_, v]) => v !== undefined && v !== null && v !== "")
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join("&");
+  const url = `${API_BASE}${path}${qs ? "?" + qs : ""}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    let body = ""; try { body = (await res.json())?.error?.message || ""; } catch {}
+    throw new Error(`API ${res.status}: ${path}${body ? " — " + body : ""}`);
+  }
+  return res.json();
+}
+
+function getBackend() { return "https://livewatch-backend.pon-node.workers.dev"; }
+
+// Livepeer contracts on Arbitrum One (from docs.livepeer.org)
+const TREASURY_ADDR = "0xf82C1FF415F1fCf582554fDba790E27019c8E8C4";
+const LPT_TOKEN_ADDR = "0x289ba1701C2F088cf0faf8B3705246331cB8A839";
+const BONDING_MANAGER_ADDR = "0x35Bcf3c30594191d53231e4ff333e8a770453e40";
+const ROUNDS_MANAGER_ADDR = "0xdd6f56DcC28D3F5f27084381fE8Df634985cc39f";
+const ARB_RPCS = [
+  "https://arbitrum-one-rpc.publicnode.com",
+  "https://arbitrum.drpc.org",
+  "https://arb1.arbitrum.io/rpc",
+];
+
+// Generic eth_call against public Arbitrum RPCs with fallback
+async function ethCall(to, data) {
+  for (const rpcUrl of ARB_RPCS) {
+    try {
+      const res = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: 1, method: "eth_call",
+          params: [{ to, data }, "latest"],
+        }),
+      });
+      if (!res.ok) continue;
+      const json = await res.json();
+      if (json.error || !json.result) continue;
+      return json.result;
+    } catch {}
+  }
+  return null;
+}
+
+// ERC20 balanceOf
+async function getLptBalance(address) {
+  const data = "0x70a08231" + address.toLowerCase().replace("0x", "").padStart(64, "0");
+  const hex = await ethCall(LPT_TOKEN_ADDR, data);
+  if (!hex) throw new Error("All Arbitrum RPCs failed");
+  return Number(BigInt(hex)) / 1e18;
+}
+
+// BondingManager.getTranscoder(address) -> first field is lastRewardRound (selector 0x1944cb05)
+async function getLastRewardRound(orchestrator) {
+  const data = "0x1944cb05" + orchestrator.toLowerCase().replace("0x", "").padStart(64, "0");
+  const hex = await ethCall(BONDING_MANAGER_ADDR, data);
+  if (!hex) return null;
+  const cleaned = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (cleaned.length < 64) return null;
+  try { return Number(BigInt("0x" + cleaned.slice(0, 64))); }
+  catch { return null; }
+}
+
+// RoundsManager.currentRound() (selector 0x8a19c8bc)
+async function getCurrentRound() {
+  const hex = await ethCall(ROUNDS_MANAGER_ADDR, "0x8a19c8bc");
+  if (!hex) return null;
+  try { return Number(BigInt(hex)); }
+  catch { return null; }
+}
+
+async function backend(path, opts = {}) {
+  const base = getBackend();
+  if (!base) throw new Error("Backend URL not configured. Click ⚙ Settings to add it.");
+  const tgUser = S.getTgUser();
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Client-Id": CLIENT_ID,
+    ...(opts.headers || {}),
+  };
+  if (tgUser?.id) headers["X-Tg-User-Id"] = String(tgUser.id);
+  const res = await fetch(`${base}${path}`, { ...opts, headers });
+  if (!res.ok) {
+    let body = ""; try { body = (await res.json())?.error || ""; } catch {}
+    throw new Error(`Backend ${res.status}: ${body || path}`);
+  }
+  return res.json();
+}
+
+// ─── Formatting ──────────────────────────────────────────────────────────────
+function lpt(val, decimals) {
+  if (val == null) return "—";
+  const d = decimals != null ? decimals : 4;
+  const n = Number(val);
+  const value = n > 1e15 ? n / 1e18 : n;
+  return value.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }) + " LPT";
+}
+function eth(val) {
+  if (val == null) return "—";
+  const n = Number(val);
+  if (n === 0) return "0.0000 ETH";
+  if (n > 1e15) return (n / 1e18).toFixed(6) + " ETH";
+  return n.toFixed(6) + " ETH";
+}
+function usd(val) {
+  if (val == null) return "—";
+  return "$" + Number(val).toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+function pct(val) { return val == null ? "—" : Number(val).toFixed(2) + "%"; }
+function shortAddr(addr) { return addr ? addr.slice(0, 6) + "…" + addr.slice(-4) : ""; }
+function fmtDate(iso) { return iso ? new Date(iso).toLocaleDateString() : "—"; }
+function fmtDateTime(d) {
+  const dt = d instanceof Date ? d : new Date(d);
+  return dt.toLocaleString(undefined, {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit"
+  });
+}
+
+// ─── Storage ─────────────────────────────────────────────────────────────────
+const S = {
+  getWallets: () => { try { return JSON.parse(localStorage.getItem("lw_wallets") || "[]"); } catch { return []; } },
+  setWallets: (w) => localStorage.setItem("lw_wallets", JSON.stringify(w)),
+  getActive: () => localStorage.getItem("lw_active") || "",
+  setActive: (a) => localStorage.setItem("lw_active", a),
+  setBackend: (u) => localStorage.setItem("lw_backend", u),
+  getSnap: (addr) => { try { return JSON.parse(localStorage.getItem(`lw_snap_${addr}`) || "null"); } catch { return null; } },
+  setSnap: (addr, snap) => localStorage.setItem(`lw_snap_${addr}`, JSON.stringify(snap)),
+  getLinked: () => { try { return JSON.parse(localStorage.getItem("lw_tg_linked") || "null"); } catch { return null; } },
+  setLinked: (data) => localStorage.setItem("lw_tg_linked", JSON.stringify(data)),
+  getNicknames: () => { try { return JSON.parse(localStorage.getItem("lw_nicknames") || "{}"); } catch { return {}; } },
+  setNicknames: (n) => localStorage.setItem("lw_nicknames", JSON.stringify(n)),
+  getNickname: (addr) => { const map = S.getNicknames(); return map[addr.toLowerCase()] || null; },
+  setNickname: (addr, name) => {
+    const map = S.getNicknames();
+    if (name) map[addr.toLowerCase()] = name;
+    else delete map[addr.toLowerCase()];
+    S.setNicknames(map);
+  },
+  getTgUser: () => { try { return JSON.parse(localStorage.getItem("lw_tg_user") || "null"); } catch { return null; } },
+  setTgUser: (u) => u ? localStorage.setItem("lw_tg_user", JSON.stringify(u)) : localStorage.removeItem("lw_tg_user"),
+  getBrowserPrefs: () => {
+    try { return JSON.parse(localStorage.getItem("lw_browser_prefs") || "null") || { enabled: false, reward_cut: true, fee_cut: true, missed_reward: true, claim_report: false }; }
+    catch { return { enabled: false, reward_cut: true, fee_cut: true, missed_reward: true, claim_report: false }; }
+  },
+  setBrowserPrefs: (p) => localStorage.setItem("lw_browser_prefs", JSON.stringify(p)),
+};
+
+// ─── Browser notifications ────────────────────────────────────────────────────
+function notifySupported() { return "Notification" in window; }
+function notifPermission() { return notifySupported() ? Notification.permission : "denied"; }
+async function requestNotifPermission() {
+  if (!notifySupported()) return "denied";
+  if (Notification.permission === "granted" || Notification.permission === "denied") return Notification.permission;
+  return await Notification.requestPermission();
+}
+function showBrowserNotification(title, body, tag) {
+  if (!notifySupported() || Notification.permission !== "granted") return;
+  try {
+    new Notification(title, {
+      body,
+      tag: tag || "livewatch",
+      icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23050a0e'/%3E%3Ccircle cx='32' cy='32' r='12' fill='%2300e5a0'/%3E%3C/svg%3E",
+    });
+  } catch (e) { console.warn("notify failed", e); }
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+function App() {
+  const [wallets, setWallets] = useState(S.getWallets());
+  const [activeAddr, setActiveAddr] = useState(S.getActive());
+  const [walletInput, setWalletInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+  const [delegator, setDelegator] = useState(null);
+  const [orchestrator, setOrchestrator] = useState(null);
+  const [cutsHistory, setCutsHistory] = useState([]);
+  const [stakeHistory, setStakeHistory] = useState([]);
+  const [netEcon, setNetEcon] = useState(null);
+  const [networkStats, setNetworkStats] = useState(null);
+  const [alerts, setAlerts] = useState([]);
+  const [lastPoll, setLastPoll] = useState(null);
+  const [progress, setProgress] = useState("");
+  const [econView, setEconView] = useState("orchestrator");
+  const [showNotifs, setShowNotifs] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [subscriptions, setSubscriptions] = useState([]);
+  const [cutsSort, setCutsSort] = useState("desc"); // 'asc' | 'desc'
+  const [roundsMap, setRoundsMap] = useState([]); // sorted array of {round, started_block}
+  const [treasuryLpt, setTreasuryLpt] = useState(null);
+  const [lptPriceUsd, setLptPriceUsd] = useState(null);
+  const [selectedMetric, setSelectedMetric] = useState(null);
+  const [nicknames, setNicknames] = useState(S.getNicknames());
+  const [tgUser, setTgUser] = useState(S.getTgUser());
+
+  const updateNickname = (addr, name) => {
+    S.setNickname(addr, name);
+    setNicknames(S.getNicknames());
+    // Push to backend if we have subs for this wallet
+    if (getBackend()) {
+      backend(`/nicknames`, {
+        method: "POST",
+        body: JSON.stringify({
+          client_id: CLIENT_ID,
+          tg_user_id: tgUser?.id,
+          wallet: addr.toLowerCase(),
+          nickname: name || null,
+        }),
+      }).catch(() => {});
+    }
+  };
+  const displayNick = (addr) => nicknames[addr.toLowerCase()] || shortAddr(addr);
+
+  const handleTgLogin = async (user) => {
+    // user = { id, first_name, last_name?, username?, photo_url?, auth_date, hash }
+    S.setTgUser(user);
+    setTgUser(user);
+    try {
+      // Associate client_id with the TG user
+      await backend(`/tg-login`, {
+        method: "POST",
+        body: JSON.stringify({ client_id: CLIENT_ID, tg_auth: user }),
+      });
+      // Fetch this user's subs across all devices and merge wallets locally
+      const r = await backend(`/subscriptions?client_id=${CLIENT_ID}&tg_user_id=${user.id}`);
+      const subs = r.subscriptions || [];
+      setSubscriptions(subs);
+      if (subs.length > 0) {
+        const seen = new Set((S.getWallets() || []).map(w => w.toLowerCase()));
+        const merged = [...(S.getWallets() || [])];
+        for (const s of subs) {
+          const w = s.wallet.toLowerCase();
+          if (!seen.has(w)) { merged.push(w); seen.add(w); }
+        }
+        S.setWallets(merged);
+        setWallets(merged);
+        // If no active wallet, set the first one
+        if (!S.getActive() && merged.length > 0) {
+          S.setActive(merged[0]);
+          setActiveAddr(merged[0]);
+        }
+        setSuccess(`✓ Welcome back, ${user.first_name}! Loaded ${subs.length} subscription${subs.length !== 1 ? "s" : ""}.`);
+        setTimeout(() => setSuccess(null), 4000);
+      }
+    } catch (e) { setError(`Login sync failed: ${e.message}`); }
+  };
+  const handleTgLogout = () => {
+    S.setTgUser(null);
+    setTgUser(null);
+  };
+
+  // Look up round number for a given block number using the rounds map
+  const blockToRound = (blockNumber) => {
+    if (!roundsMap.length || blockNumber == null) return null;
+    const bn = BigInt(blockNumber);
+    // roundsMap is sorted by round DESC (newest first). Find first round whose started_block <= bn.
+    for (const r of roundsMap) {
+      if (BigInt(r.started_block) <= bn) return r.round;
+    }
+    return null;
+  };
+
+  const fetchAll = useCallback(async (addr) => {
+    if (!addr) return;
+    setLoading(true); setError(null);
+    try {
+      setProgress("Loading delegator…");
+      const del = await api(`/delegators/${addr}`);
+      setDelegator(del);
+
+      if (!del.delegations || del.delegations.length === 0) {
+        setError("Delegator has no active delegations.");
+        setOrchestrator(null);
+        return;
+      }
+      // API returns delegations sorted by bonded_principal DESC, but the largest
+      // historical bond isn't necessarily the current one. The current delegation
+      // is the one with the most recent as_of_block.
+      const activeDelegation = [...del.delegations].sort((a, b) =>
+        Number(b.as_of_block) - Number(a.as_of_block)
+      )[0];
+      // Store the chosen active delegation back into the delegator object so
+      // myDelegation can pick it up consistently.
+      del.activeDelegation = activeDelegation;
+      const orchAddr = activeDelegation.delegate_address;
+
+      setProgress("Loading orchestrator…");
+      const [orch, cuts, stakeHist, netE, netStats, lptPriceRes] = await Promise.all([
+        api(`/orchestrators/${orchAddr}`),
+        api(`/orchestrators/${orchAddr}/cuts-history`),
+        api(`/orchestrators/${orchAddr}/stake-history`),
+        api(`/orchestrators/${orchAddr}/net-economics`, { period_days: 30 }),
+        api(`/network/stats`).catch(() => null),
+        api(`/prices/LPT/USD/latest`).catch(() => null),
+      ]);
+
+      // Build block→round map from stake-history (already has round + block_number pairs)
+      if (stakeHist?.data) {
+        const map = stakeHist.data
+          .map(s => ({ round: s.round, started_block: s.block_number }))
+          .sort((a, b) => Number(b.started_block) - Number(a.started_block));
+        setRoundsMap(map);
+      }
+
+      // Fetch treasury LPT balance (don't block — fire and forget)
+      getLptBalance(TREASURY_ADDR)
+        .then(bal => setTreasuryLpt(bal))
+        .catch(e => console.warn("Treasury balance fetch failed:", e.message));
+
+      if (lptPriceRes?.price) {
+        setLptPriceUsd(Number(lptPriceRes.price));
+      }
+
+      const prevSnap = S.getSnap(addr);
+      const cutsData = cuts.data || [];
+      const localAlerts = [];
+      const browserPrefs = S.getBrowserPrefs();
+      const now = new Date();
+      if (prevSnap?.cuts && cutsData.length > 0 && prevSnap.cuts.length > 0) {
+        if (cutsData[0].event_id !== prevSnap.cuts[0].event_id) {
+          if (cutsData[0].reward_cut_percent !== prevSnap.cuts[0].reward_cut_percent) {
+            const up = Number(cutsData[0].reward_cut_percent) > Number(prevSnap.cuts[0].reward_cut_percent);
+            const msg = `Reward cut ${up?"↑":"↓"}: ${pct(prevSnap.cuts[0].reward_cut_percent)} → ${pct(cutsData[0].reward_cut_percent)}`;
+            localAlerts.push({ id: Date.now()+1, type: up?"warn":"good", icon: up?"⚠️":"✅",
+              msg, time: fmtDateTime(now) });
+            if (browserPrefs.enabled && browserPrefs.reward_cut) {
+              showBrowserNotification(`${up?"⚠️":"✅"} LiveWatch — Reward Cut ${up?"Increased":"Decreased"}`, msg, "reward_cut");
+            }
+          }
+          if (cutsData[0].fee_cut_percent !== prevSnap.cuts[0].fee_cut_percent) {
+            const up = Number(cutsData[0].fee_cut_percent) > Number(prevSnap.cuts[0].fee_cut_percent);
+            const msg = `Fee cut ${up?"↑":"↓"}: ${pct(prevSnap.cuts[0].fee_cut_percent)} → ${pct(cutsData[0].fee_cut_percent)}`;
+            localAlerts.push({ id: Date.now()+2, type: up?"warn":"good", icon: up?"⚠️":"✅",
+              msg, time: fmtDateTime(now) });
+            if (browserPrefs.enabled && browserPrefs.fee_cut) {
+              showBrowserNotification(`${up?"⚠️":"✅"} LiveWatch — Fee Cut ${up?"Increased":"Decreased"}`, msg, "fee_cut");
+            }
+          }
+        }
+      }
+      if (localAlerts.length) setAlerts(p => [...localAlerts, ...p].slice(0, 30));
+
+      // Missed reward check (on-chain RPC) — only if browser notifications enabled for this
+      if (browserPrefs.enabled && browserPrefs.missed_reward) {
+        try {
+          const [chainCurrent, chainLastReward] = await Promise.all([
+            getCurrentRound(),
+            getLastRewardRound(orchAddr),
+          ]);
+          if (chainCurrent != null && chainLastReward != null) {
+            const claimed = chainLastReward >= chainCurrent;
+            const wasMissed = prevSnap?.missed_round || 0;
+            if (!claimed && wasMissed !== chainCurrent) {
+              // First time seeing this round as unclaimed
+              const msg = `Round ${chainCurrent} not yet claimed by orchestrator`;
+              localAlerts.push({ id: Date.now()+3, type: "warn", icon: "🔴", msg, time: fmtDateTime(now) });
+              showBrowserNotification("🔴 LiveWatch — Current Round Not Claimed", msg, "missed_reward");
+            } else if (claimed && wasMissed) {
+              // Resolution
+              const msg = `Round ${chainCurrent} claimed ✓`;
+              localAlerts.push({ id: Date.now()+4, type: "good", icon: "✅", msg, time: fmtDateTime(now) });
+              showBrowserNotification("✅ LiveWatch — Reward Claimed", msg, "missed_reward");
+            }
+            // Persist state in snapshot
+            S.setSnap(addr, { cuts: cutsData, missed_round: claimed ? 0 : chainCurrent, last_reward_event: prevSnap?.last_reward_event });
+          } else {
+            S.setSnap(addr, { cuts: cutsData, missed_round: prevSnap?.missed_round || 0, last_reward_event: prevSnap?.last_reward_event });
+          }
+        } catch (e) {
+          console.warn("Missed-reward RPC check failed:", e.message);
+          S.setSnap(addr, { cuts: cutsData, missed_round: prevSnap?.missed_round || 0, last_reward_event: prevSnap?.last_reward_event });
+        }
+      } else {
+        S.setSnap(addr, { cuts: cutsData, missed_round: prevSnap?.missed_round || 0, last_reward_event: prevSnap?.last_reward_event });
+      }
+
+      // Claim report check (API) — fire when a new Reward event appears
+      if (browserPrefs.enabled && browserPrefs.claim_report) {
+        try {
+          const rewardRes = await api(`/events`, {
+            contract: "BondingManager", event_name: "Reward",
+            address: orchAddr, sort: "block_number_desc", limit: 1,
+            with_valuations: true,
+          });
+          const latestReward = (rewardRes?.data || [])[0];
+          if (latestReward && prevSnap?.last_reward_event && latestReward.id !== prevSnap.last_reward_event) {
+            const lptAmount = Number(latestReward.amount_native || 0);
+            const usdRow = (latestReward.valuations || []).find(v => v.asset === "LPT");
+            const usdAmount = usdRow ? Number(usdRow.amount_usd || 0) : null;
+            const msg = `Orchestrator claimed ${lptAmount.toFixed(4)} LPT` + (usdAmount ? ` (~$${usdAmount.toFixed(2)})` : "");
+            localAlerts.push({ id: Date.now()+5, type: "good", icon: "💰", msg, time: fmtDateTime(now) });
+            showBrowserNotification("💰 LiveWatch — Rewards Claimed", msg, "claim_report");
+          }
+          // Always update last_reward_event so we don't re-trigger
+          if (latestReward) {
+            const snapNow = S.getSnap(addr) || {};
+            S.setSnap(addr, { ...snapNow, last_reward_event: latestReward.id });
+          }
+        } catch (e) { console.warn("Claim report API check failed:", e.message); }
+      }
+      // Re-set alerts if we added more after the first setAlerts call
+      if (localAlerts.length) setAlerts(p => {
+        const seen = new Set(p.map(x => x.id));
+        const fresh = localAlerts.filter(x => !seen.has(x.id));
+        return [...fresh, ...p].slice(0, 30);
+      });
+
+      setOrchestrator(orch);
+      setCutsHistory(cutsData);
+      setStakeHistory(stakeHist.data || []);
+      setNetEcon(netE);
+      setNetworkStats(netStats);
+      setLastPoll(new Date());
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); setProgress(""); }
+  }, []);
+
+  useEffect(() => {
+    if (!activeAddr) return;
+    fetchAll(activeAddr);
+    const id = setInterval(() => fetchAll(activeAddr), POLL_INTERVAL);
+    return () => clearInterval(id);
+  }, [activeAddr, fetchAll]);
+
+  // Load subscriptions (scoped to client_id + tg_user_id if logged in)
+  useEffect(() => {
+    if (!getBackend()) { setSubscriptions([]); return; }
+    const qs = tgUser?.id
+      ? `client_id=${CLIENT_ID}&tg_user_id=${tgUser.id}`
+      : `client_id=${CLIENT_ID}`;
+    backend(`/subscriptions?${qs}`)
+      .then(r => setSubscriptions(r.subscriptions || []))
+      .catch(() => setSubscriptions([]));
+  }, [showNotifs, tgUser?.id]);
+
+  const addWallet = () => {
+    const t = walletInput.trim().toLowerCase();
+    if (!/^0x[a-f0-9]{40}$/.test(t)) { setError("Invalid Ethereum address."); return; }
+    setError(null);
+    if (!wallets.includes(t)) {
+      const updated = [...wallets, t];
+      setWallets(updated); S.setWallets(updated);
+    }
+    S.setActive(t); setActiveAddr(t); setWalletInput(""); setAlerts([]);
+  };
+  const switchWallet = (addr) => { S.setActive(addr); setActiveAddr(addr); setAlerts([]); };
+  const removeWallet = (addr, e) => {
+    e.stopPropagation();
+    const updated = wallets.filter(w => w !== addr);
+    setWallets(updated); S.setWallets(updated);
+    localStorage.removeItem(`lw_snap_${addr}`);
+    if (activeAddr === addr) {
+      const next = updated[0] || "";
+      S.setActive(next); setActiveAddr(next);
+      if (!next) { setDelegator(null); setOrchestrator(null); }
+    }
+  };
+
+  const myDelegation = delegator?.activeDelegation || delegator?.delegations?.[0];
+  const computeDelegatorEcon = () => {
+    if (!netEcon || !orchestrator || !myDelegation) return null;
+    const myStake = Number(myDelegation.bonded_principal);
+    const totalStake = Number(orchestrator.total_stake);
+    if (!totalStake || totalStake === 0) return null;
+    const myShare = myStake / totalStake;
+    const rewardCut = Number(orchestrator.reward_cut_percent) / 100;
+    const feeCut = Number(orchestrator.fee_cut_percent) / 100;
+    const myRewards = Number(netEcon.gross_rewards_usd) * (1 - rewardCut) * myShare;
+    const myPayouts = Number(netEcon.gross_payouts_usd) * (1 - feeCut) * myShare;
+    return {
+      gross_rewards_usd: myRewards.toString(),
+      gross_payouts_usd: myPayouts.toString(),
+      gross_total_usd: (myRewards + myPayouts).toString(),
+      gas_cost_native_eth: "0",
+      period_days: netEcon.period_days,
+    };
+  };
+  const econToShow = econView === "delegator" ? computeDelegatorEcon() : netEcon;
+
+  return (
+    <div className="app">
+      <header className="header">
+        <div className="logo">
+          LIVEWATCH<span>.</span>
+          <small>Livepeer Delegator Monitor · Arbitrum One</small>
+        </div>
+        <div className="live-dot">
+          <span className="dot" />
+          <span>{loading && progress ? progress : lastPoll ? `Last sync ${lastPoll.toLocaleTimeString()}` : "Awaiting data"}</span>
+        </div>
+      </header>
+
+      {wallets.length > 0 && (
+        <div className="wallets-bar">
+          {wallets.map(w => {
+            const nick = nicknames[w.toLowerCase()];
+            return (
+              <div key={w} className={`wallet-chip ${w === activeAddr ? "active" : ""}`} onClick={() => switchWallet(w)}>
+                {nick ? (
+                  <>
+                    <span className="nick">{nick}</span>
+                    <span className="sub-addr">{shortAddr(w)}</span>
+                  </>
+                ) : (
+                  <span>{shortAddr(w)}</span>
+                )}
+                <span className="edit" onClick={(e) => {
+                  e.stopPropagation();
+                  const current = nicknames[w.toLowerCase()] || "";
+                  const next = prompt(`Nickname for ${shortAddr(w)}:`, current);
+                  if (next !== null) updateNickname(w, next.trim());
+                }} title="Edit nickname">✎</span>
+                <span className="x" onClick={(e) => removeWallet(w, e)}>✕</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="search-wrap">
+        <input className="search-input" placeholder="Add delegator wallet (0x…)" value={walletInput}
+          onChange={e => setWalletInput(e.target.value)} onKeyDown={e => e.key === "Enter" && addWallet()} />
+        <button className="btn" onClick={addWallet} disabled={loading}>
+          {loading ? <><span className="spinner" />Sync</> : "Add"}
+        </button>
+      </div>
+
+      <div className="controls-bar">
+        <button className="btn-ghost" onClick={() => setShowNotifs(true)} disabled={!activeAddr}>
+          🔔 Notifications {subscriptions.length > 0 ? `(${subscriptions.length})` : ""}
+        </button>
+        {tgUser ? (
+          <div className="tg-user-badge">
+            {tgUser.photo_url && <img className="tg-user-avatar" src={tgUser.photo_url} alt="" />}
+            <span>✓ {tgUser.first_name}{tgUser.username ? ` (@${tgUser.username})` : ""}</span>
+            <span style={{cursor:"pointer",marginLeft:4,color:"var(--muted)"}} onClick={handleTgLogout} title="Log out">✕</span>
+          </div>
+        ) : (
+          <TelegramLoginButton onLogin={handleTgLogin} />
+        )}
+      </div>
+
+      {error && <div className="error-msg">⚠ {error}</div>}
+      {success && <div className="error-msg" style={{background:"rgba(0,229,160,.1)",borderColor:"rgba(0,229,160,.3)",color:"var(--accent)"}}>✓ {success}</div>}
+
+      {!delegator && !loading && !error && (
+        <div className="empty">
+          <h2>{wallets.length === 0 ? "Add your first delegator address" : "Select a wallet above"}</h2>
+          <p>
+            Track Livepeer delegator wallets,<br />
+            get notified on Telegram when orchestrators change reward cuts,<br />
+            miss rewards, or change fees.<br /><br />
+            <span style={{color:"var(--accent)"}}>Powered by Livepeer Valuation API</span>
+          </p>
+        </div>
+      )}
+
+      {delegator && orchestrator && (
+        <>
+          <div className="orch-header">
+            {orchestrator.avatar_url ? <img className="orch-avatar" src={orchestrator.avatar_url} alt="" /> : <div className="orch-avatar" />}
+            <div className="orch-info">
+              <div className="orch-name">{orchestrator.display_name || shortAddr(orchestrator.address)}</div>
+              <div className="orch-addr">{orchestrator.address}</div>
+            </div>
+            {orchestrator.is_active && <span className="badge badge-active">Active</span>}
+          </div>
+
+          <div className="card">
+            <div className="card-title"><span>Alerts ({alerts.length})</span>
+              {alerts.length > 0 && <button className="btn-ghost" onClick={() => setAlerts([])}>Clear all</button>}
+            </div>
+            <div className="alerts-list">
+              {alerts.length === 0 ? <div className="no-alerts">No alerts since last sync</div>
+                : alerts.map(a => (
+                  <div key={a.id} className={`alert-item ${a.type}`}>
+                    <span className="alert-icon">{a.icon}</span>
+                    <div className="alert-body"><div className="alert-msg">{a.msg}</div><div className="alert-time">{a.time}</div></div>
+                    <button className="alert-dismiss" onClick={() => setAlerts(p => p.filter(x => x.id !== a.id))}>✕</button>
+                  </div>
+                ))}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-title">Your Position</div>
+            <div className="stats-grid">
+              <div className="stat"><div className="stat-label">Bonded</div><div className="stat-value accent">{lpt(myDelegation?.bonded_principal)}</div></div>
+              <div className="stat"><div className="stat-label">Pending Stake</div><div className="stat-value">{lpt(myDelegation?.pending_stake)}</div></div>
+              <div className="stat"><div className="stat-label">Pending Fees</div><div className="stat-value accent2">{eth(myDelegation?.pending_fees)}</div></div>
+              <div className="stat"><div className="stat-label">Status</div><div className="stat-value" style={{fontSize:14, color: delegator.is_active ? "var(--accent)" : "var(--muted)"}}>{delegator.is_active ? "Active ✓" : "Inactive"}</div></div>
+            </div>
+          </div>
+
+          <div className="row">
+            <div className="card">
+              <div className="card-title">Reward Cut</div>
+              <div className="stat-value accent" style={{fontSize:36,fontWeight:700}}>{pct(orchestrator.reward_cut_percent)}</div>
+              <div className="stat-sub">% kept by orchestrator from inflation rewards</div>
+            </div>
+            <div className="card">
+              <div className="card-title">Fee Cut</div>
+              <div className="stat-value accent2" style={{fontSize:36,fontWeight:700}}>{pct(orchestrator.fee_cut_percent)}</div>
+              <div className="stat-sub">% kept by orchestrator from transcoding fees</div>
+            </div>
+            <div className="card">
+              <div className="card-title">Total Stake</div>
+              <div className="stat-value" style={{fontSize:28,fontWeight:700}}>{lpt(orchestrator.total_stake)}</div>
+              <div className="stat-sub">Combined orch + delegator stake</div>
+            </div>
+          </div>
+
+          {netEcon && (
+            <div className="card">
+              <div className="card-title">
+                <span>30-Day Net Economics</span>
+                <div className="toggle-group">
+                  <button className={`toggle-opt ${econView === "orchestrator" ? "active" : ""}`} onClick={() => setEconView("orchestrator")}>Orchestrator</button>
+                  <button className={`toggle-opt ${econView === "delegator" ? "active" : ""}`} onClick={() => setEconView("delegator")}>Delegator (You)</button>
+                </div>
+              </div>
+              {econToShow ? (
+                <div className="stats-grid">
+                  <div className="stat">
+                    <div className="stat-label">{econView === "orchestrator" ? "Gross Payouts" : "Your Payout Share"}</div>
+                    <div className="stat-value accent">{usd(econToShow.gross_payouts_usd)}</div>
+                    <div className="stat-sub">From transcoding tickets</div>
+                  </div>
+                  <div className="stat">
+                    <div className="stat-label">{econView === "orchestrator" ? "Gross Rewards" : "Your Reward Share"}</div>
+                    <div className="stat-value accent2">{usd(econToShow.gross_rewards_usd)}</div>
+                    <div className="stat-sub">From inflation</div>
+                  </div>
+                  {econView === "orchestrator" && (
+                    <div className="stat">
+                      <div className="stat-label">Gas Cost</div>
+                      <div className="stat-value warn">{eth(econToShow.gas_cost_native_eth)}</div>
+                      <div className="stat-sub">Tx fees paid (ETH)</div>
+                    </div>
+                  )}
+                  <div className="stat">
+                    <div className="stat-label">{econView === "orchestrator" ? "Gross Total" : "Your Total"}</div>
+                    <div className="stat-value">{usd(econToShow.gross_total_usd)}</div>
+                    <div className="stat-sub">Payouts + rewards (USD)</div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{color:"var(--muted)",fontSize:12,padding:16}}>Cannot compute delegator share — missing stake data.</div>
+              )}
+              {econView === "delegator" && (
+                <div style={{fontSize:10,color:"var(--muted)",marginTop:8}}>
+                  Estimated as (your bonded / total stake) × gross × (1 − cut). Excludes pending/unclaimed amounts.
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="card">
+            <div className="card-title">Cut Change History</div>
+            <div className="table-wrap">
+              <table>
+                <thead><tr>
+                  <th style={{cursor:"pointer", userSelect:"none"}} onClick={() => setCutsSort(s => s === "desc" ? "asc" : "desc")}>
+                    Date {cutsSort === "desc" ? "↓" : "↑"}
+                  </th>
+                  <th>Reward Cut</th><th>Fee Cut</th><th>Fee Share</th>
+                </tr></thead>
+                <tbody>
+                  {cutsHistory.length === 0
+                    ? <tr><td colSpan={4} style={{textAlign:"center",color:"var(--muted)",padding:24}}>No cut changes on record</td></tr>
+                    : (() => {
+                        // Sort by block_timestamp/block_number DESC first to ensure we have newest events
+                        const sortedDesc = cutsHistory.slice().sort((a, b) => {
+                          const ta = a.block_timestamp ? new Date(a.block_timestamp).getTime() : Number(a.block_number || 0);
+                          const tb = b.block_timestamp ? new Date(b.block_timestamp).getTime() : Number(b.block_number || 0);
+                          return tb - ta;
+                        });
+                        // Always take the 10 newest
+                        const top10Desc = sortedDesc.slice(0, 10);
+                        // Then apply user's preferred sort direction
+                        const sortedForDisplay = cutsSort === "desc"
+                          ? top10Desc
+                          : top10Desc.slice().reverse();
+                        return sortedForDisplay.map((c) => {
+                          // For change detection, look at the chronologically-prior event in sorted (desc) array
+                          const origIdx = sortedDesc.findIndex(x => x.event_id === c.event_id);
+                          const prev = sortedDesc[origIdx + 1];
+                          const rcChanged = prev && c.reward_cut_percent !== prev.reward_cut_percent;
+                          const fcChanged = prev && c.fee_cut_percent !== prev.fee_cut_percent;
+                          return (
+                            <tr key={c.event_id}>
+                              <td>{fmtDate(c.block_timestamp)}</td>
+                              <td className={rcChanged ? "changed-rc" : ""}>{pct(c.reward_cut_percent)}</td>
+                              <td className={fcChanged ? "changed-rc" : ""}>{pct(c.fee_cut_percent)}</td>
+                              <td>{pct(c.fee_share_percent)}</td>
+                            </tr>);
+                        });
+                      })()}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {networkStats && (
+            <div className="card">
+              <div className="card-title">
+                <span>Network Context</span>
+                <span style={{fontSize:10,color:"var(--muted)",letterSpacing:1}}>click row for 90-day chart</span>
+              </div>
+              <NetworkMetricsTable
+                networkStats={networkStats}
+                treasuryLpt={treasuryLpt}
+                lptPriceUsd={lptPriceUsd}
+                onSelectMetric={setSelectedMetric}
+              />
+            </div>
+          )}
+
+          <div className="footer-note">
+            Data: livepeer-network-api.cloudspe.com<br />
+            {`Backend: ${new URL(getBackend()).hostname} · checks every 30m`}<br />
+            {wallets.length} wallet{wallets.length !== 1 ? "s" : ""} tracked · {subscriptions.length} subscription{subscriptions.length !== 1 ? "s" : ""}
+          </div>
+        </>
+      )}
+
+      {showSettings && (
+        <SettingsModal onClose={() => setShowSettings(false)} onSave={(url) => { S.setBackend(url); window.location.reload(); }} />
+      )}
+
+      {showNotifs && activeAddr && (
+        <NotificationsModal
+          wallet={activeAddr}
+          subscriptions={subscriptions}
+          tgUser={tgUser}
+          onClose={() => setShowNotifs(false)}
+          onChange={() => {
+            const qs = tgUser?.id ? `client_id=${CLIENT_ID}&tg_user_id=${tgUser.id}` : `client_id=${CLIENT_ID}`;
+            backend(`/subscriptions?${qs}`).then(r => setSubscriptions(r.subscriptions || []));
+          }}
+          setError={setError}
+          setSuccess={setSuccess}
+        />
+      )}
+
+      {selectedMetric && (
+        <MetricChartModal
+          metric={selectedMetric}
+          lptPriceUsd={lptPriceUsd}
+          onClose={() => setSelectedMetric(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function SettingsModal({ onClose, onSave }) {
+  const [url, setUrl] = useState(getBackend());
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="modal-title">Backend Settings</div>
+        <div className="modal-subtitle">Configure your Cloudflare Worker URL to enable Telegram notifications.</div>
+        <div className="form-group">
+          <label className="form-label">Worker URL</label>
+          <input className="form-input" placeholder="https://livewatch-backend.you.workers.dev" value={url} onChange={e => setUrl(e.target.value)} />
+          <div className="form-help">Deploy the worker.js file to Cloudflare Workers and paste your worker URL here. See README for deployment steps.</div>
+        </div>
+        <button className="btn" onClick={() => onSave(url.replace(/\/$/, ""))}>Save</button>
+      </div>
+    </div>
+  );
+}
+
+function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, setError, setSuccess }) {
+  const [section, setSection] = useState("telegram"); // 'telegram' | 'browser'
+  const [channel, setChannel] = useState("telegram");
+  const [notify, setNotify] = useState({ reward_cut: true, fee_cut: true, missed_reward: true, claim_report: false });
+  const [tgCode, setTgCode] = useState(null);
+  const [tgBotName, setTgBotName] = useState(null);
+  const [tgChatId, setTgChatId] = useState(S.getLinked()?.chat_id || null);
+  const [tgUsername, setTgUsername] = useState(S.getLinked()?.username || null);
+  const [polling, setPolling] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [browserPrefs, setBrowserPrefs] = useState(S.getBrowserPrefs());
+  const [permission, setPermission] = useState(notifPermission());
+  const pollRef = useRef(null);
+
+  const startTelegramLink = async () => {
+    try {
+      setBusy(true);
+      const res = await backend("/telegram/link", { method: "POST", body: "{}" });
+      setTgCode(res.code); setTgBotName(res.bot_username); setPolling(true);
+      pollRef.current = setInterval(async () => {
+        try {
+          const r = await backend(`/telegram/poll/${res.code}`);
+          if (r.linked) {
+            clearInterval(pollRef.current); setPolling(false);
+            setTgChatId(r.telegram_chat_id); setTgUsername(r.telegram_username);
+            S.setLinked({ chat_id: r.telegram_chat_id, username: r.telegram_username });
+            setSuccess("Telegram linked! Now select notification types and subscribe.");
+            setTimeout(() => setSuccess(null), 4000);
+          }
+        } catch {}
+      }, 2000);
+      setTimeout(() => { if (pollRef.current) { clearInterval(pollRef.current); setPolling(false); } }, 600_000);
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  const createSub = async () => {
+    if (!notify.reward_cut && !notify.fee_cut && !notify.missed_reward && !notify.claim_report) {
+      setError("Select at least one notification type."); return;
+    }
+    try {
+      setBusy(true);
+      const body = {
+        client_id: CLIENT_ID,
+        tg_user_id: tgUser?.id || null,
+        wallet, channel,
+        notify_reward_cut: notify.reward_cut,
+        notify_fee_cut: notify.fee_cut,
+        notify_missed_reward: notify.missed_reward,
+        notify_claim_report: notify.claim_report,
+        telegram_chat_id: tgChatId,
+      };
+      await backend("/subscriptions", { method: "POST", body: JSON.stringify(body) });
+      setSuccess("Subscription created! Check Telegram for confirmation.");
+      setTimeout(() => setSuccess(null), 4000);
+      onChange();
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const deleteSub = async (id) => {
+    try {
+      await backend(`/subscriptions/${id}`, { method: "DELETE" });
+      onChange();
+    } catch (e) { setError(e.message); }
+  };
+
+  const updateBrowserPrefs = (changes) => {
+    const next = { ...browserPrefs, ...changes };
+    setBrowserPrefs(next);
+    S.setBrowserPrefs(next);
+  };
+
+  const toggleBrowserEnabled = async (enabled) => {
+    if (enabled) {
+      const perm = await requestNotifPermission();
+      setPermission(perm);
+      if (perm !== "granted") {
+        setError("Notifications blocked by browser. Check site permissions.");
+        return;
+      }
+      showBrowserNotification("LiveWatch — Notifications Enabled", "You'll be notified here when something happens.", "test");
+    }
+    updateBrowserPrefs({ enabled });
+  };
+
+  const canSubmit = channel === "telegram" && !!tgChatId;
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="modal-title">Notifications</div>
+        <div className="modal-subtitle">Choose how you want to be alerted for <code style={{color:"var(--accent)"}}>{shortAddr(wallet)}</code>. Telegram works 24/7; browser notifications only fire while the page is loaded.</div>
+
+        {/* Section tabs */}
+        <div className="channel-tabs">
+          <button className={`channel-tab ${section === "telegram" ? "active" : ""}`} onClick={() => setSection("telegram")}>📱 Telegram</button>
+          <button className={`channel-tab ${section === "browser" ? "active" : ""}`} onClick={() => setSection("browser")}>🌐 Browser</button>
+        </div>
+
+        {section === "telegram" && (
+          <>
+            {subscriptions.length > 0 && (
+              <div className="form-group">
+                <label className="form-label">Your Active Telegram Subscriptions</label>
+                {subscriptions.map(s => (
+                  <div className="sub-item" key={s.id}>
+                    <span className="sub-channel-icon">📱</span>
+                    <div className="sub-info">
+                      <div className="sub-title">
+                        {shortAddr(s.wallet)}
+                        {s.notify_reward_cut ? " · Reward cut" : ""}
+                        {s.notify_fee_cut ? " · Fee cut" : ""}
+                        {s.notify_missed_reward ? " · Missed reward" : ""}
+                        {s.notify_claim_report ? " · Claim reports" : ""}
+                      </div>
+                      <div className="sub-meta">Telegram chat {s.telegram_chat_id}</div>
+                    </div>
+                    <button className="btn-ghost danger" onClick={() => deleteSub(s.id)}>✕ Remove</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="form-group">
+              <label className="form-label">Link Telegram</label>
+              {!tgChatId && !tgCode && (
+                <button className="btn" onClick={startTelegramLink} disabled={busy}>
+                  {busy ? <><span className="spinner" />Starting…</> : "Link Telegram"}
+                </button>
+              )}
+              {tgCode && !tgChatId && (
+                <div className="code-display">
+                  <div className="code">{tgCode}</div>
+                  <div className="code-help">
+                    Open Telegram → message <strong>@{tgBotName}</strong> → send this code<br />
+                    {polling && <><span className="spinner" />Waiting for your message…</>}
+                  </div>
+                </div>
+              )}
+              {tgChatId && (
+                <div style={{padding:12,background:"var(--bg)",border:"1px solid var(--accent)",borderRadius:4,fontSize:12,color:"var(--accent)"}}>
+                  ✓ Linked to {tgUsername ? `@${tgUsername}` : `chat ${tgChatId}`}
+                </div>
+              )}
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Alert Notifications</label>
+              <div className="checkbox-group">
+                <label className="checkbox-item">
+                  <input type="checkbox" checked={notify.reward_cut} onChange={e => setNotify(n => ({ ...n, reward_cut: e.target.checked }))} />
+                  <div className="ck-text">
+                    <div className="ck-title">Reward cut changes</div>
+                    <div className="ck-desc">When the orchestrator changes the % they keep from inflation rewards.</div>
+                  </div>
+                </label>
+                <label className="checkbox-item">
+                  <input type="checkbox" checked={notify.fee_cut} onChange={e => setNotify(n => ({ ...n, fee_cut: e.target.checked }))} />
+                  <div className="ck-text">
+                    <div className="ck-title">Fee cut changes</div>
+                    <div className="ck-desc">When the orchestrator adjusts the % they keep from transcoding fees.</div>
+                  </div>
+                </label>
+                <label className="checkbox-item">
+                  <input type="checkbox" checked={notify.missed_reward} onChange={e => setNotify(n => ({ ...n, missed_reward: e.target.checked }))} />
+                  <div className="ck-text">
+                    <div className="ck-title">Reward not claimed</div>
+                    <div className="ck-desc">When the orchestrator misses calling reward() — you lose inflation rewards for that round.</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Detailed Claim Reports</label>
+              <div className="checkbox-group">
+                <label className="checkbox-item">
+                  <input type="checkbox" checked={notify.claim_report} onChange={e => setNotify(n => ({ ...n, claim_report: e.target.checked }))} />
+                  <div className="ck-text">
+                    <div className="ck-title">Round claim reports</div>
+                    <div className="ck-desc">When the orchestrator successfully claims rewards for a round, get a breakdown: total minted LPT, orchestrator share, delegators share, your share, and USD value at time of claim.</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <button className="btn" onClick={createSub} disabled={!canSubmit || busy} style={{width:"100%"}}>
+              {busy ? <><span className="spinner" />Creating…</> : "Subscribe via Telegram"}
+            </button>
+          </>
+        )}
+
+        {section === "browser" && (
+          <>
+            <div className="form-group">
+              <label className="form-label">Enable Browser Notifications</label>
+              {!notifySupported() ? (
+                <div style={{padding:12,background:"rgba(255,107,53,.1)",border:"1px solid rgba(255,107,53,.3)",borderRadius:4,fontSize:12,color:"var(--warn)"}}>
+                  ⚠ Your browser doesn't support notifications.
+                </div>
+              ) : permission === "denied" ? (
+                <div style={{padding:12,background:"rgba(255,59,92,.1)",border:"1px solid rgba(255,59,92,.3)",borderRadius:4,fontSize:12,color:"var(--danger)"}}>
+                  Notifications blocked. Go to your browser's site settings for this page and allow notifications, then refresh.
+                </div>
+              ) : (
+                <label className="checkbox-item" style={{cursor:"pointer"}}>
+                  <input type="checkbox" checked={browserPrefs.enabled} onChange={e => toggleBrowserEnabled(e.target.checked)} />
+                  <div className="ck-text">
+                    <div className="ck-title">{browserPrefs.enabled ? "🔔 Enabled" : "🔕 Disabled"}</div>
+                    <div className="ck-desc">Get desktop/mobile popups while LiveWatch is open. Tip: install as a PWA (Add to Home Screen) for better persistence on mobile.</div>
+                  </div>
+                </label>
+              )}
+            </div>
+
+            {browserPrefs.enabled && (
+              <div className="form-group">
+                <label className="form-label">Which Events to Notify</label>
+                <div className="checkbox-group">
+                  <label className="checkbox-item">
+                    <input type="checkbox" checked={browserPrefs.reward_cut} onChange={e => updateBrowserPrefs({ reward_cut: e.target.checked })} />
+                    <div className="ck-text">
+                      <div className="ck-title">Reward cut changes</div>
+                      <div className="ck-desc">Popup when orchestrator changes reward cut.</div>
+                    </div>
+                  </label>
+                  <label className="checkbox-item">
+                    <input type="checkbox" checked={browserPrefs.fee_cut} onChange={e => updateBrowserPrefs({ fee_cut: e.target.checked })} />
+                    <div className="ck-text">
+                      <div className="ck-title">Fee cut changes</div>
+                      <div className="ck-desc">Popup when orchestrator changes fee cut.</div>
+                    </div>
+                  </label>
+                  <label className="checkbox-item">
+                    <input type="checkbox" checked={browserPrefs.missed_reward} onChange={e => updateBrowserPrefs({ missed_reward: e.target.checked })} />
+                    <div className="ck-text">
+                      <div className="ck-title">Reward not claimed</div>
+                      <div className="ck-desc">Popup when orchestrator misses a round.</div>
+                    </div>
+                  </label>
+                  <label className="checkbox-item">
+                    <input type="checkbox" checked={browserPrefs.claim_report} onChange={e => updateBrowserPrefs({ claim_report: e.target.checked })} />
+                    <div className="ck-text">
+                      <div className="ck-title">Claim reports</div>
+                      <div className="ck-desc">Popup with claim breakdown when orchestrator claims rewards.</div>
+                    </div>
+                  </label>
+                </div>
+                <div style={{marginTop:12,fontSize:11,color:"var(--muted)",padding:12,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:4}}>
+                  💡 <strong>For mobile background notifications:</strong> use Telegram. Browser notifications only fire while the LiveWatch tab is open.
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Telegram Login Widget ────────────────────────────────────────────────────
+// IMPORTANT: requires you to run /setdomain in @BotFather and enter your
+// frontend domain (e.g. yourusername.github.io). Without that step,
+// the widget will refuse to render the button.
+function TelegramLoginButton({ onLogin }) {
+  const containerRef = useRef(null);
+  const [botUsername, setBotUsername] = useState(null);
+
+  // Fetch bot username from backend (so we don't have to hardcode it client-side)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        // Try to fetch from backend (uses our existing /telegram/link as it returns bot_username)
+        const r = await backend(`/telegram/link`, { method: "POST", body: "{}" });
+        if (!cancelled && r.bot_username) setBotUsername(r.bot_username);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!botUsername || !containerRef.current) return;
+    // Expose the callback globally so Telegram's widget can call it
+    window.onTelegramAuth = (user) => onLogin(user);
+    // Clear previous widget
+    containerRef.current.innerHTML = "";
+    const script = document.createElement("script");
+    script.async = true;
+    script.src = "https://telegram.org/js/telegram-widget.js?22";
+    script.setAttribute("data-telegram-login", botUsername);
+    script.setAttribute("data-size", "medium");
+    script.setAttribute("data-radius", "4");
+    script.setAttribute("data-onauth", "onTelegramAuth(user)");
+    script.setAttribute("data-request-access", "write");
+    containerRef.current.appendChild(script);
+  }, [botUsername, onLogin]);
+
+  if (!botUsername) {
+    return <span style={{color:"var(--muted)",fontSize:11}}>…</span>;
+  }
+  return <div ref={containerRef} style={{display:"inline-block"}} />;
+}
+
+// ─── Network Metrics Table ───────────────────────────────────────────────────
+function NetworkMetricsTable({ networkStats, treasuryLpt, lptPriceUsd, onSelectMetric }) {
+  const [prevRound, setPrevRound] = useState(null);
+  const [prevDay, setPrevDay] = useState(null);
+  const [todayDay, setTodayDay] = useState(null);
+  const [sparks, setSparks] = useState({}); // metric_key -> array of {x, y}
+
+  // Fetch previous round, yesterday's totals, and today's totals
+  useEffect(() => {
+    (async () => {
+      try {
+        if (networkStats.latest_round) {
+          const prevRoundId = Number(networkStats.latest_round) - 1;
+          const r = await api(`/rounds/${prevRoundId}`).catch(() => null);
+          if (r) setPrevRound(r);
+        }
+        // For live payouts/rewards: use rolling 24h aggregation (sum face_value over last 24h)
+        // and the prior 24h for the delta.
+        const now = new Date();
+        const t0 = new Date(now.getTime() - 24 * 3600 * 1000);
+        const t1 = new Date(now.getTime() - 48 * 3600 * 1000);
+        const isoNow = now.toISOString();
+        const iso24 = t0.toISOString();
+        const iso48 = t1.toISOString();
+
+        const sumAgg = async (contract, eventName, from, to) => {
+          const res = await api(`/aggregations/events`, {
+            contract, event_name: eventName, bucket: "hour", metric: "sum_amount_usd",
+            from, to,
+          }).catch(() => null);
+          if (!res?.results) return null;
+          return res.results.reduce((acc, b) => acc + Number(b.value || 0), 0);
+        };
+
+        const [payNow, rewNow, payPrev, rewPrev] = await Promise.all([
+          sumAgg("TicketBroker", "WinningTicketRedeemed", iso24, isoNow),
+          sumAgg("BondingManager", "Reward", iso24, isoNow),
+          sumAgg("TicketBroker", "WinningTicketRedeemed", iso48, iso24),
+          sumAgg("BondingManager", "Reward", iso48, iso24),
+        ]);
+        setTodayDay({ payouts: payNow, rewards: rewNow });
+        setPrevDay({ payouts: payPrev, rewards: rewPrev });
+      } catch (e) { console.warn("Live 24h fetch failed:", e.message); }
+    })();
+  }, [networkStats.latest_round]);
+
+  // Fetch sparkline data (30 days) for all metrics in parallel
+  useEffect(() => {
+    (async () => {
+      try {
+        // Rounds index for stake + active orchs (last 30 rounds)
+        const roundsRes = await api(`/rounds`, { limit: 30 }).catch(() => null);
+        const rounds = (roundsRes?.data || []).slice().reverse(); // oldest -> newest
+
+        // Aggregations for payouts and rewards (last 30 days, USD)
+        const today = new Date();
+        const from = new Date(); from.setDate(from.getDate() - 30);
+        const payAggr = await api(`/aggregations/events`, {
+          contract: "TicketBroker",
+          event_name: "WinningTicketRedeemed",
+          bucket: "day",
+          metric: "sum_amount_usd",
+          from: from.toISOString().slice(0, 10),
+          to: today.toISOString().slice(0, 10),
+        }).catch(() => null);
+        const rewAggr = await api(`/aggregations/events`, {
+          contract: "BondingManager",
+          event_name: "Reward",
+          bucket: "day",
+          metric: "sum_amount_usd",
+          from: from.toISOString().slice(0, 10),
+          to: today.toISOString().slice(0, 10),
+        }).catch(() => null);
+
+        // Treasury history from backend
+        const treasuryRes = await backend(`/treasury/history?days=30`).catch(() => null);
+
+        setSparks({
+          active_orchs: rounds.map(r => ({ x: r.started_at, y: r.active_orchestrators })),
+          total_stake: rounds.map(r => ({ x: r.started_at, y: Number(r.total_lpt_staked) })),
+          payouts: (payAggr?.results || []).map(b => ({ x: b.bucket_start, y: Number(b.value || 0) })),
+          rewards: (rewAggr?.results || []).map(b => ({ x: b.bucket_start, y: Number(b.value || 0) })),
+          treasury: (treasuryRes?.history || []).map(t => ({ x: t.date, y: t.balance })),
+        });
+      } catch (e) { console.warn("Sparkline fetch failed:", e.message); }
+    })();
+  }, []);
+
+  const metrics = [
+    {
+      key: "active_orchs",
+      label: "Active Orchs",
+      value: networkStats.active_orchestrators,
+      formatted: networkStats.active_orchestrators,
+      prev: prevRound?.active_orchestrators,
+      formatDelta: (d) => (d > 0 ? "+" : "") + d,
+      cls: "",
+      spark_color: "var(--accent)",
+    },
+    {
+      key: "total_stake",
+      label: "Total LPT Staked",
+      value: Number(networkStats.total_lpt_staked),
+      formatted: lpt(networkStats.total_lpt_staked, 0),
+      prev: prevRound?.total_lpt_staked ? Number(prevRound.total_lpt_staked) : null,
+      formatDelta: (d) => (d > 0 ? "+" : "") + d.toFixed(2) + " LPT",
+      cls: "accent",
+      spark_color: "var(--accent)",
+    },
+    {
+      key: "payouts",
+      label: "Payouts 24h",
+      value: todayDay?.payouts != null ? Number(todayDay.payouts) : Number(networkStats.payouts_usd_24h),
+      formatted: todayDay?.payouts != null ? usd(todayDay.payouts) : usd(networkStats.payouts_usd_24h),
+      prev: prevDay?.payouts != null ? Number(prevDay.payouts) : null,
+      formatDelta: (d) => (d > 0 ? "+" : "") + "$" + d.toFixed(2),
+      cls: "",
+      spark_color: "var(--accent)",
+    },
+    {
+      key: "treasury",
+      label: "Treasury LPT",
+      value: treasuryLpt,
+      formatted: treasuryLpt != null
+        ? lpt(treasuryLpt, 2) + (lptPriceUsd != null ? `  (~${usd(treasuryLpt * lptPriceUsd)})` : "")
+        : "Loading…",
+      prev: null,
+      formatDelta: () => null,
+      cls: "accent2",
+      spark_color: "var(--accent2)",
+    },
+  ];
+
+  return (
+    <table className="metrics-table">
+      <thead>
+        <tr>
+          <th>Metric</th>
+          <th>Current</th>
+          <th>Δ vs prev</th>
+          <th>30d trend</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {metrics.map(m => {
+          const delta = (m.prev != null && m.value != null) ? Number(m.value) - Number(m.prev) : null;
+          const deltaCls = delta == null ? "flat" : delta > 0 ? "up" : delta < 0 ? "down" : "flat";
+          const deltaStr = delta == null ? "—" : m.formatDelta(delta);
+          const series = sparks[m.key] || [];
+          return (
+            <tr key={m.key} onClick={() => onSelectMetric(m)}>
+              <td className="metric-label">{m.label}</td>
+              <td className={`metric-value ${m.cls}`}>{m.formatted}</td>
+              <td>
+                <span className={`metric-delta ${deltaCls}`}>{delta != null ? (delta > 0 ? "↑ " : delta < 0 ? "↓ " : "") + deltaStr : "—"}</span>
+              </td>
+              <td>
+                {series.length > 0
+                  ? <Sparkline data={series} color={m.spark_color} />
+                  : <span style={{color:"var(--muted)",fontSize:10}}>—</span>}
+              </td>
+              <td className="metric-arrow">→</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+// ─── Sparkline (small SVG line) ──────────────────────────────────────────────
+function Sparkline({ data, color = "var(--accent)", width = 100, height = 28 }) {
+  // Filter out invalid points
+  const clean = (data || []).filter(d => d && d.x != null && d.y != null && !isNaN(Number(d.y)));
+  if (clean.length === 0) return <span style={{color:"var(--muted)",fontSize:10}}>—</span>;
+  if (clean.length === 1) return <span style={{color:"var(--muted)",fontSize:10}}>1 point</span>;
+
+  const values = clean.map(d => Number(d.y));
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const step = width / (clean.length - 1);
+  const points = clean.map((d, i) => {
+    const x = i * step;
+    const y = height - ((Number(d.y) - min) / range) * height;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  return (
+    <svg className="metric-spark" width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+      <polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// ─── Metric Chart Modal ──────────────────────────────────────────────────────
+function MetricChartModal({ metric, lptPriceUsd, onClose }) {
+  const [range, setRange] = useState("30d"); // 1d, 7d, 30d, 90d
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const rangeDays = { "1d": 1, "7d": 7, "30d": 30, "90d": 90 }[range];
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true); setError(null);
+      try {
+        let series = [];
+        const today = new Date();
+        const from = new Date(); from.setDate(from.getDate() - rangeDays);
+
+        if (metric.key === "total_stake" || metric.key === "active_orchs") {
+          // Always fetch at least 30 rounds to ensure we have enough points
+          // (Rounds API ignores time bounds, just give us recent rounds)
+          const fetchLimit = Math.max(rangeDays, 30);
+          const res = await api(`/rounds`, { limit: fetchLimit });
+          const rounds = (res?.data || []).slice().reverse(); // oldest first
+          // Slice to requested range
+          const cutoff = from.getTime();
+          const filtered = rounds.filter(r => new Date(r.started_at).getTime() >= cutoff);
+          const finalRounds = filtered.length >= 2 ? filtered : rounds; // fallback to all
+          if (metric.key === "total_stake") {
+            series = finalRounds.map(r => ({ x: r.started_at, y: Number(r.total_lpt_staked) }));
+          } else {
+            series = finalRounds.map(r => ({ x: r.started_at, y: r.active_orchestrators }));
+          }
+        } else if (metric.key === "payouts" || metric.key === "rewards") {
+          const eventName = metric.key === "payouts" ? "WinningTicketRedeemed" : "Reward";
+          const contract = metric.key === "payouts" ? "TicketBroker" : "BondingManager";
+          const res = await api(`/aggregations/events`, {
+            contract, event_name: eventName, bucket: "day", metric: "sum_amount_usd",
+            from: from.toISOString().slice(0, 10),
+            to: today.toISOString().slice(0, 10),
+          });
+          series = (res?.results || []).map(b => ({ x: b.bucket_start, y: Number(b.value || 0) }));
+        } else if (metric.key === "treasury") {
+          const res = await backend(`/treasury/history?days=${rangeDays}`);
+          series = (res?.history || []).map(t => ({ x: t.date, y: t.balance }));
+        }
+
+        if (!cancelled) setData(series);
+      } catch (e) {
+        if (!cancelled) setError(e.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [metric.key, range, rangeDays]);
+
+  // Compute chart stats
+  const values = data.map(d => Number(d.y) || 0);
+  const min = values.length ? Math.min(...values) : 0;
+  const max = values.length ? Math.max(...values) : 0;
+  const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+  const first = values[0] || 0;
+  const last = values[values.length - 1] || 0;
+  const change = last - first;
+  const changePct = first !== 0 ? (change / first) * 100 : 0;
+
+  const isUsd = metric.key === "payouts" || metric.key === "rewards";
+  const isLpt = metric.key === "total_stake" || metric.key === "treasury";
+  const formatVal = (v) => {
+    if (isUsd) return usd(v);
+    if (isLpt) return lpt(v, 0);
+    return Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal chart-modal" onClick={e => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="modal-title">{metric.label}</div>
+
+        <div className="chart-header">
+          <div>
+            <div className="chart-current-label">Current</div>
+            <div className={`chart-current ${metric.cls}`}>{metric.formatted}</div>
+          </div>
+          <div className="chart-range-tabs">
+            {["1d", "7d", "30d", "90d"].map(r => (
+              <button key={r} className={`chart-range-tab ${range === r ? "active" : ""}`} onClick={() => setRange(r)}>{r}</button>
+            ))}
+          </div>
+        </div>
+
+        {loading && <div className="chart-empty"><span className="spinner" />Loading {range} chart…</div>}
+        {error && <div className="error-msg">⚠ {error}</div>}
+        {!loading && !error && data.length < 2 && (
+          <div className="chart-empty">
+            {metric.key === "treasury"
+              ? <>Treasury history is being collected once a day.<br />Check back tomorrow for the first chart.</>
+              : <>Not enough data points yet for the {range} chart.<br />Try a longer range or check back later.</>}
+          </div>
+        )}
+        {!loading && !error && data.length >= 2 && (
+          <>
+            <LineChart data={data} formatVal={formatVal} color={metric.cls === "accent2" ? "var(--accent2)" : "var(--accent)"} />
+            <div className="chart-stats">
+              <div><div className="chart-stat-label">Start</div><div className="chart-stat-value">{formatVal(first)}</div></div>
+              <div><div className="chart-stat-label">End</div><div className="chart-stat-value">{formatVal(last)}</div></div>
+              <div><div className="chart-stat-label">Change</div><div className="chart-stat-value" style={{color: change > 0 ? "var(--accent)" : change < 0 ? "var(--danger)" : "var(--text)"}}>
+                {change > 0 ? "+" : ""}{formatVal(change)} ({changePct > 0 ? "+" : ""}{changePct.toFixed(2)}%)
+              </div></div>
+              <div><div className="chart-stat-label">Min</div><div className="chart-stat-value">{formatVal(min)}</div></div>
+              <div><div className="chart-stat-label">Max</div><div className="chart-stat-value">{formatVal(max)}</div></div>
+              <div><div className="chart-stat-label">Avg</div><div className="chart-stat-value">{formatVal(avg)}</div></div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Line Chart (full size with axes) ────────────────────────────────────────
+function LineChart({ data, formatVal, color = "var(--accent)" }) {
+  const [hover, setHover] = useState(null);
+  const svgRef = useRef(null);
+
+  const W = 800, H = 320;
+  const PAD_L = 64, PAD_R = 16, PAD_T = 16, PAD_B = 40;
+  const innerW = W - PAD_L - PAD_R;
+  const innerH = H - PAD_T - PAD_B;
+
+  // Filter out null/NaN points
+  const clean = (data || []).filter(d => d && d.x != null && d.y != null && !isNaN(Number(d.y)));
+  if (clean.length < 2) return <div className="chart-empty">Not enough data points to draw chart.</div>;
+
+  const values = clean.map(d => Number(d.y));
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const padding = range * 0.1;
+  const yMin = Math.max(0, min - padding);
+  const yMax = max + padding;
+  const yRange = yMax - yMin || 1;
+
+  const xStep = innerW / (clean.length - 1 || 1);
+  const points = clean.map((d, i) => {
+    const x = PAD_L + i * xStep;
+    const y = PAD_T + innerH - ((Number(d.y) - yMin) / yRange) * innerH;
+    return { x, y, dx: d.x, dy: Number(d.y) };
+  });
+  const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+  const areaD = `${pathD} L ${points[points.length - 1].x.toFixed(1)} ${PAD_T + innerH} L ${PAD_L} ${PAD_T + innerH} Z`;
+
+  // Y-axis gridlines (5 of them)
+  const ySteps = 5;
+  const yLines = Array.from({ length: ySteps + 1 }, (_, i) => {
+    const value = yMin + (yRange * i) / ySteps;
+    const y = PAD_T + innerH - (i / ySteps) * innerH;
+    return { value, y };
+  });
+
+  // X-axis labels (up to 5 evenly-spaced)
+  const xLabelCount = Math.min(5, clean.length);
+  const xLabels = Array.from({ length: xLabelCount }, (_, i) => {
+    const idx = xLabelCount > 1
+      ? Math.floor((clean.length - 1) * i / (xLabelCount - 1))
+      : 0;
+    return { idx, x: PAD_L + idx * xStep, label: new Date(clean[idx].x).toLocaleDateString(undefined, { day: "2-digit", month: "short" }) };
+  });
+
+  const handleMove = (e) => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const mx = ((e.clientX - rect.left) / rect.width) * W;
+    // Find closest point
+    let closest = null, closestDist = Infinity;
+    for (const p of points) {
+      const d = Math.abs(p.x - mx);
+      if (d < closestDist) { closestDist = d; closest = p; }
+    }
+    setHover(closest);
+  };
+
+  return (
+    <div style={{position:"relative"}}>
+      <svg ref={svgRef} className="chart-svg" viewBox={`0 0 ${W} ${H}`} onMouseMove={handleMove} onMouseLeave={() => setHover(null)} preserveAspectRatio="none">
+        {/* Gridlines */}
+        {yLines.map((g, i) => (
+          <g key={i}>
+            <line className="chart-grid-line" x1={PAD_L} y1={g.y} x2={W - PAD_R} y2={g.y} />
+            <text className="chart-axis-label" x={PAD_L - 8} y={g.y + 4} textAnchor="end">{formatVal(g.value)}</text>
+          </g>
+        ))}
+        {/* X-axis labels */}
+        {xLabels.map((l, i) => (
+          <text key={i} className="chart-axis-label" x={l.x} y={H - PAD_B + 18} textAnchor="middle">{l.label}</text>
+        ))}
+        {/* Area fill */}
+        <path className="chart-area" d={areaD} fill={color} />
+        {/* Line */}
+        <path d={pathD} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        {/* Hover indicator */}
+        {hover && (
+          <>
+            <line x1={hover.x} y1={PAD_T} x2={hover.x} y2={PAD_T + innerH} stroke={color} strokeWidth="1" strokeDasharray="3,3" opacity="0.5" />
+            <circle cx={hover.x} cy={hover.y} r="5" fill={color} stroke="var(--bg)" strokeWidth="2" />
+          </>
+        )}
+      </svg>
+      {hover && (
+        <div className="chart-tooltip" style={{
+          left: `${(hover.x / W) * 100}%`,
+          top: `${(hover.y / H) * 100}%`,
+          transform: "translate(-50%, -120%)",
+        }}>
+          <div style={{color:"var(--muted)",fontSize:10,marginBottom:2}}>{new Date(hover.dx).toLocaleDateString(undefined, {day:"2-digit",month:"short",year:"numeric"})}</div>
+          <div style={{color:color,fontWeight:600}}>{formatVal(hover.dy)}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
