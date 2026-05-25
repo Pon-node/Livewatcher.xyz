@@ -440,6 +440,8 @@ const S = {
   },
   getTgUser: () => { try { return JSON.parse(localStorage.getItem("lw_tg_user") || "null"); } catch { return null; } },
   setTgUser: (u) => u ? localStorage.setItem("lw_tg_user", JSON.stringify(u)) : localStorage.removeItem("lw_tg_user"),
+  getDiscordUser: () => { try { return JSON.parse(localStorage.getItem("lw_discord_user") || "null"); } catch { return null; } },
+  setDiscordUser: (u) => u ? localStorage.setItem("lw_discord_user", JSON.stringify(u)) : localStorage.removeItem("lw_discord_user"),
   getBrowserPrefs: () => {
     try { return JSON.parse(localStorage.getItem("lw_browser_prefs") || "null") || { enabled: false, reward_cut: true, fee_cut: true, missed_reward: true, claim_report: false }; }
     catch { return { enabled: false, reward_cut: true, fee_cut: true, missed_reward: true, claim_report: false }; }
@@ -1109,11 +1111,14 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
   const [tgUsername, setTgUsername] = useState(S.getLinked()?.username || null);
   const [polling, setPolling] = useState(false);
   const [emailAddress, setEmailAddress] = useState("");
-  const [discordWebhook, setDiscordWebhook] = useState("");
+  const [discordUser, setDiscordUser] = useState(S.getDiscordUser());
+  const [discordLinking, setDiscordLinking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [browserPrefs, setBrowserPrefs] = useState(S.getBrowserPrefs());
   const [permission, setPermission] = useState(notifPermission());
   const pollRef = useRef(null);
+  const discordPollRef = useRef(null);
+  const discordPopupRef = useRef(null);
 
   const startTelegramLink = async () => {
     try {
@@ -1136,7 +1141,36 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
     } catch (e) { setError(e.message); }
     finally { setBusy(false); }
   };
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+  useEffect(() => () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (discordPollRef.current) clearInterval(discordPollRef.current);
+  }, []);
+
+  const startDiscordLink = async () => {
+    try {
+      setBusy(true);
+      const res = await backend("/discord/link", { method: "POST", body: "{}" });
+      setBusy(false);
+      setDiscordLinking(true);
+      discordPopupRef.current = window.open(res.auth_url, "discord_oauth", "width=500,height=750,noopener");
+      discordPollRef.current = setInterval(async () => {
+        try {
+          const r = await backend(`/discord/poll/${res.state}`);
+          if (r.linked) {
+            clearInterval(discordPollRef.current);
+            setDiscordLinking(false);
+            const user = { discord_user_id: r.discord_user_id, discord_username: r.discord_username };
+            setDiscordUser(user);
+            S.setDiscordUser(user);
+            setSuccess(`Discord linked as ${r.discord_username}! Now subscribe.`);
+            setTimeout(() => setSuccess(null), 5000);
+            if (discordPopupRef.current && !discordPopupRef.current.closed) discordPopupRef.current.close();
+          }
+        } catch {}
+      }, 2000);
+      setTimeout(() => { if (discordPollRef.current) { clearInterval(discordPollRef.current); setDiscordLinking(false); } }, 600_000);
+    } catch (e) { setError(e.message); setBusy(false); }
+  };
 
   const createSub = async (ch) => {
     if (!notify.reward_cut && !notify.fee_cut && !notify.missed_reward && !notify.claim_report) {
@@ -1145,8 +1179,8 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
     if (ch === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddress)) {
       setError("Enter a valid email address."); return;
     }
-    if (ch === "discord" && !discordWebhook.startsWith("https://discord.com/api/webhooks/")) {
-      setError("Enter a valid Discord webhook URL (starts with https://discord.com/api/webhooks/)."); return;
+    if (ch === "discord" && !discordUser?.discord_user_id) {
+      setError("Link your Discord account first."); return;
     }
     try {
       setBusy(true);
@@ -1160,7 +1194,9 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
         notify_claim_report: notify.claim_report,
         telegram_chat_id: ch === "telegram" ? tgChatId : null,
         email_address: ch === "email" ? emailAddress.trim() : null,
-        discord_webhook_url: ch === "discord" ? discordWebhook.trim() : null,
+        discord_user_id: ch === "discord" ? discordUser?.discord_user_id : null,
+        discord_username: ch === "discord" ? discordUser?.discord_username : null,
+        discord_webhook_url: null,
       };
       await backend("/subscriptions", { method: "POST", body: JSON.stringify(body) });
       const confirmMsg = ch === "telegram"
@@ -1335,7 +1371,7 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
                     <span className="sub-channel-icon">🎮</span>
                     <div className="sub-info">
                       <div className="sub-title">{shortAddr(s.wallet)}{s.notify_reward_cut ? " · Reward cut" : ""}{s.notify_fee_cut ? " · Fee cut" : ""}{s.notify_missed_reward ? " · Missed reward" : ""}{s.notify_claim_report ? " · Claim reports" : ""}</div>
-                      <div className="sub-meta">Discord webhook</div>
+                      <div className="sub-meta">{s.discord_username ? `@${s.discord_username}` : "Discord DM"}</div>
                     </div>
                     <button className="btn-ghost danger" onClick={() => deleteSub(s.id)}>✕ Remove</button>
                   </div>
@@ -1343,13 +1379,29 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
               </div>
             )}
             <div className="form-group">
-              <label className="form-label">Discord Webhook URL</label>
-              <input className="form-input" type="url" placeholder="https://discord.com/api/webhooks/…" value={discordWebhook} onChange={e => setDiscordWebhook(e.target.value)} />
-              <div className="form-help">In Discord: channel settings → Integrations → Webhooks → New Webhook → Copy Webhook URL.</div>
+              <label className="form-label">Link Discord Account</label>
+              {!discordUser && !discordLinking && (
+                <button className="btn" onClick={startDiscordLink} disabled={busy}>
+                  {busy ? <><span className="spinner" />Starting…</> : "🎮 Authorize with Discord"}
+                </button>
+              )}
+              {discordLinking && (
+                <div style={{padding:14,background:"var(--bg)",border:"1px solid var(--border2)",borderRadius:4,fontSize:12,color:"var(--muted)",lineHeight:1.6}}>
+                  <span className="spinner" />Waiting for Discord authorization in popup window…<br/>
+                  <span style={{fontSize:11}}>Complete the OAuth flow in the popup, then come back here.</span>
+                </div>
+              )}
+              {discordUser && (
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:12,background:"var(--bg)",border:"1px solid var(--accent)",borderRadius:4,fontSize:12,color:"var(--accent)"}}>
+                  <span>✓ {discordUser.discord_username}</span>
+                  <span style={{cursor:"pointer",color:"var(--muted)",fontSize:11}} onClick={() => { setDiscordUser(null); S.setDiscordUser(null); }}>Unlink</span>
+                </div>
+              )}
+              <div className="form-help" style={{marginTop:8}}>LiveWatch will send you direct messages on Discord when alerts fire. Requires DISCORD_BOT_TOKEN + DISCORD_CLIENT_ID + DISCORD_CLIENT_SECRET set on the backend.</div>
             </div>
             {notifyCheckboxes}
-            <button className="btn" onClick={() => createSub("discord")} disabled={!discordWebhook || busy} style={{width:"100%"}}>
-              {busy ? <><span className="spinner" />Creating…</> : "Subscribe via Discord"}
+            <button className="btn" onClick={() => createSub("discord")} disabled={!discordUser || busy} style={{width:"100%"}}>
+              {busy ? <><span className="spinner" />Creating…</> : "Subscribe via Discord DM"}
             </button>
           </>
         )}

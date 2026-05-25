@@ -11,6 +11,7 @@ crons = ["*/30 * * * *"]
 [vars]
 LIVEPEER_API_BASE = "https://livepeer-network-api.cloudspe.com/api/v1"
 TELEGRAM_BOT_USERNAME = "livewatch_alerts_bot"
+DISCORD_CLIENT_ID = ""    # <-- paste your Discord application client ID
 
 # ───── KV Namespaces ─────
 # Replace the placeholder IDs after running: wrangler kv namespace create <NAME>
@@ -29,3 +30,5 @@ id = "9cccd98c1c7847c9aa7cae2d220e97d3"
 # ───── Secrets (set via CLI, NOT here) ─────
 # Run: wrangler secret put TELEGRAM_BOT_TOKEN
 # Run: wrangler secret put RESEND_API_KEY        (required for email notifications)
+# Run: wrangler secret put DISCORD_BOT_TOKEN     (required for Discord DM notifications)
+# Run: wrangler secret put DISCORD_CLIENT_SECRET (required for Discord OAuth)

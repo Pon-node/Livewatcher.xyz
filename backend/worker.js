@@ -214,8 +214,35 @@ async function sendDiscord(env, webhookUrl, title, message) {
       }],
     }),
   });
-  if (!res.ok) console.warn(`Discord send failed: ${res.status} ${await res.text()}`);
+  if (!res.ok) console.warn(`Discord webhook failed: ${res.status} ${await res.text()}`);
   return res.ok;
+}
+
+async function sendDiscordDM(env, userId, title, message) {
+  if (!env.DISCORD_BOT_TOKEN) { console.warn("DISCORD_BOT_TOKEN not set"); return false; }
+  const headers = { "Authorization": `Bot ${env.DISCORD_BOT_TOKEN}`, "Content-Type": "application/json" };
+  // Open DM channel
+  const dmRes = await fetch("https://discord.com/api/v10/users/@me/channels", {
+    method: "POST", headers,
+    body: JSON.stringify({ recipient_id: String(userId) }),
+  });
+  if (!dmRes.ok) { console.warn(`Discord DM channel create failed: ${dmRes.status} ${await dmRes.text()}`); return false; }
+  const { id: channelId } = await dmRes.json();
+  // Send message
+  const msgRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+    method: "POST", headers,
+    body: JSON.stringify({
+      embeds: [{
+        title,
+        description: message,
+        color: 0x00e5a0,
+        footer: { text: "LiveWatch · livewatcher.xyz" },
+        timestamp: new Date().toISOString(),
+      }],
+    }),
+  });
+  if (!msgRes.ok) console.warn(`Discord DM send failed: ${msgRes.status} ${await msgRes.text()}`);
+  return msgRes.ok;
 }
 
 async function editTelegram(env, chatId, messageId, text, replyMarkup) {
@@ -311,8 +338,9 @@ async function dispatch(env, sub, title, message) {
   if (sub.channel === "email" && sub.email_address) {
     return sendEmail(env, sub.email_address, title, text);
   }
-  if (sub.channel === "discord" && sub.discord_webhook_url) {
-    return sendDiscord(env, sub.discord_webhook_url, title, text);
+  if (sub.channel === "discord") {
+    if (sub.discord_user_id) return sendDiscordDM(env, sub.discord_user_id, title, text);
+    if (sub.discord_webhook_url) return sendDiscord(env, sub.discord_webhook_url, title, text);
   }
   return false;
 }
@@ -616,14 +644,14 @@ async function handleRequest(request, env) {
   // POST /subscriptions
   if (method === "POST" && path === "/subscriptions") {
     const body = await request.json().catch(() => ({}));
-    const { client_id, tg_user_id, wallet, channel, notify_reward_cut, notify_fee_cut, notify_missed_reward, notify_claim_report, telegram_chat_id, email_address, discord_webhook_url } = body;
+    const { client_id, tg_user_id, wallet, channel, notify_reward_cut, notify_fee_cut, notify_missed_reward, notify_claim_report, telegram_chat_id, email_address, discord_webhook_url, discord_user_id, discord_username } = body;
 
     if (!isUuid(client_id)) return err("Invalid client_id");
     if (!wallet || !/^0x[a-f0-9]{40}$/i.test(wallet)) return err("Invalid wallet address");
     if (!ALLOWED_CHANNELS.includes(channel)) return err(`Channel must be one of: ${ALLOWED_CHANNELS.join(", ")}`);
     if (channel === "telegram" && !telegram_chat_id) return err("telegram_chat_id required for Telegram channel");
     if (channel === "email" && !email_address) return err("email_address required for email channel");
-    if (channel === "discord" && !discord_webhook_url) return err("discord_webhook_url required for Discord channel");
+    if (channel === "discord" && !discord_user_id && !discord_webhook_url) return err("discord_user_id or discord_webhook_url required for Discord channel");
     if (!notify_reward_cut && !notify_fee_cut && !notify_missed_reward && !notify_claim_report) return err("Select at least one notification type");
 
     const existing = await listSubsByClient(env, client_id);
@@ -637,6 +665,8 @@ async function handleRequest(request, env) {
       channel,
       telegram_chat_id: telegram_chat_id || null,
       email_address: email_address || null,
+      discord_user_id: discord_user_id || null,
+      discord_username: discord_username || null,
       discord_webhook_url: discord_webhook_url || null,
       notify_reward_cut: !!notify_reward_cut,
       notify_fee_cut: !!notify_fee_cut,
@@ -711,6 +741,74 @@ async function handleRequest(request, env) {
       return json({ linked: true, telegram_chat_id: codeData.chat_id, telegram_username: codeData.username });
     }
     return json({ linked: false });
+  }
+
+  // ── Discord OAuth ────────────────────────────────────────────────────────────
+
+  // POST /discord/link — generate OAuth state, return authorization URL
+  if (method === "POST" && path === "/discord/link") {
+    if (!env.DISCORD_CLIENT_ID) return err("Discord not configured (missing DISCORD_CLIENT_ID)");
+    const state = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+    await env.CODES.put(`discord_state:${state}`, "", { expirationTtl: 600 });
+    const origin = new URL(request.url).origin;
+    const params = new URLSearchParams({
+      client_id: env.DISCORD_CLIENT_ID,
+      redirect_uri: `${origin}/discord/callback`,
+      response_type: "code",
+      scope: "identify",
+      state,
+    });
+    return json({ auth_url: `https://discord.com/api/oauth2/authorize?${params}`, state, expires_in: 600 });
+  }
+
+  // GET /discord/callback — OAuth code exchange (redirect from Discord)
+  if (method === "GET" && path === "/discord/callback") {
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    const redirectFrontend = "https://livewatcher.xyz";
+    if (!code || !state) return Response.redirect(`${redirectFrontend}?discord_error=missing_params`, 302);
+    const stateKey = `discord_state:${state}`;
+    const existing = await env.CODES.get(stateKey);
+    if (existing === null) return Response.redirect(`${redirectFrontend}?discord_error=expired`, 302);
+    const origin = new URL(request.url).origin;
+    // Exchange code for access token
+    const tokenRes = await fetch("https://discord.com/api/v10/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: env.DISCORD_CLIENT_ID,
+        client_secret: env.DISCORD_CLIENT_SECRET,
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: `${origin}/discord/callback`,
+      }),
+    });
+    if (!tokenRes.ok) return Response.redirect(`${redirectFrontend}?discord_error=token_exchange`, 302);
+    const { access_token } = await tokenRes.json();
+    // Fetch user info
+    const userRes = await fetch("https://discord.com/api/v10/users/@me", {
+      headers: { "Authorization": `Bearer ${access_token}` },
+    });
+    if (!userRes.ok) return Response.redirect(`${redirectFrontend}?discord_error=user_fetch`, 302);
+    const user = await userRes.json();
+    // Store user info keyed by state
+    await env.CODES.put(stateKey, JSON.stringify({
+      discord_user_id: user.id,
+      discord_username: user.global_name || user.username,
+    }), { expirationTtl: 600 });
+    return Response.redirect(`${redirectFrontend}?discord_linked=1`, 302);
+  }
+
+  // GET /discord/poll/:state — frontend polls for completed OAuth
+  if (method === "GET" && path.startsWith("/discord/poll/")) {
+    const state = path.slice("/discord/poll/".length);
+    const val = await env.CODES.get(`discord_state:${state}`);
+    if (!val) return json({ linked: false });
+    try {
+      const data = JSON.parse(val);
+      if (!data.discord_user_id) return json({ linked: false });
+      return json({ linked: true, ...data });
+    } catch { return json({ linked: false }); }
   }
 
   // POST /telegram/webhook (Telegram → us)
