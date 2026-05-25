@@ -1149,17 +1149,19 @@ async function handleRequest(request, env) {
     const payByDate = Object.fromEntries((payRes?.results || []).map(b => [b.bucket_start, Number(b.value || 0)]));
     const rewByDate = Object.fromEntries((rewRes?.results || []).map(b => [b.bucket_start, Number(b.value || 0)]));
     const allDates = new Set([...Object.keys(payByDate), ...Object.keys(rewByDate)]);
-    let count = 0;
+    let count = 0, skipped = 0;
     for (const date of allDates) {
       if (date >= toDate) continue; // skip today — bucket not complete
-      await env.SUBS.put(`daily:${date}`, JSON.stringify({
+      const key = `daily:${date}`;
+      if (await env.SUBS.get(key)) { skipped++; continue; } // idempotent — skip existing
+      await env.SUBS.put(key, JSON.stringify({
         date,
         payouts_usd: payByDate[date] || 0,
         rewards_usd: rewByDate[date] || 0,
       }), { expirationTtl: 95 * 86400 });
       count++;
     }
-    return json({ ok: true, populated: count, from: fromDate, to: toDate });
+    return json({ ok: true, populated: count, skipped, from: fromDate, to: toDate });
   }
 
   // POST /debug/trigger?sub_id=... — manually run check for one sub (or all) without waiting for cron
