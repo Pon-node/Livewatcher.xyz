@@ -1587,6 +1587,17 @@ function NetworkMetricsTable({ networkStats, treasuryLpt, lptPriceUsd, onSelectM
           ]);
           payoutsSpark = (pa?.results || []).map(b => ({ x: b.bucket_start, y: Number(b.value || 0) }));
           rewardsSpark = (ra?.results || []).map(b => ({ x: b.bucket_start, y: Number(b.value || 0) }));
+          // Also populate stat cards from fallback data
+          if (payoutsSpark.length >= 1) {
+            const l = payoutsSpark[payoutsSpark.length - 1];
+            const lr = rewardsSpark[rewardsSpark.length - 1];
+            setTodayDay({ payouts: l.y, rewards: lr?.y ?? null, date: l.x });
+          }
+          if (payoutsSpark.length >= 2) {
+            const p = payoutsSpark[payoutsSpark.length - 2];
+            const pr = rewardsSpark[rewardsSpark.length - 2];
+            setPrevDay({ payouts: p.y, rewards: pr?.y ?? null });
+          }
         }
 
         setSparks({
