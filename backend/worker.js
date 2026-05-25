@@ -755,7 +755,8 @@ async function handleRequest(request, env) {
       client_id: env.DISCORD_CLIENT_ID,
       redirect_uri: `${origin}/discord/callback`,
       response_type: "code",
-      scope: "identify",
+      scope: "identify applications.commands",
+      integration_type: "1",  // 1 = user install (allows DMs without shared server)
       state,
     });
     return json({ auth_url: `https://discord.com/api/oauth2/authorize?${params}`, state, expires_in: 600 });
