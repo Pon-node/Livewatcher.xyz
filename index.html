@@ -849,7 +849,7 @@ function App() {
         </button>
         {tgUser ? (
           <div className="tg-user-badge">
-            {tgUser.photo_url && <img className="tg-user-avatar" src={tgUser.photo_url} alt="" />}
+            {tgUser.photo_url?.startsWith("https://") && <img className="tg-user-avatar" src={tgUser.photo_url} alt="" />}
             <span>✓ {tgUser.first_name}{tgUser.username ? ` (@${tgUser.username})` : ""}</span>
             <span style={{cursor:"pointer",marginLeft:4,color:"var(--muted)"}} onClick={handleTgLogout} title="Log out">✕</span>
           </div>
@@ -876,7 +876,7 @@ function App() {
       {delegator && orchestrator && (
         <>
           <div className="orch-header">
-            {orchestrator.avatar_url ? <img className="orch-avatar" src={orchestrator.avatar_url} alt="" /> : <div className="orch-avatar" />}
+            {orchestrator.avatar_url?.startsWith("https://") ? <img className="orch-avatar" src={orchestrator.avatar_url} alt="" /> : <div className="orch-avatar" />}
             <div className="orch-info">
               <div className="orch-name">{orchestrator.display_name || shortAddr(orchestrator.address)}</div>
               <div className="orch-addr">{orchestrator.address}</div>
@@ -1144,6 +1144,7 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
   useEffect(() => () => {
     if (pollRef.current) clearInterval(pollRef.current);
     if (discordPollRef.current) clearInterval(discordPollRef.current);
+    if (discordPopupRef.current && !discordPopupRef.current.closed) discordPopupRef.current.close();
   }, []);
 
   const startDiscordLink = async () => {
@@ -1165,10 +1166,11 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
             setSuccess(`Discord linked as ${r.discord_username}! Now subscribe.`);
             setTimeout(() => setSuccess(null), 5000);
             if (discordPopupRef.current && !discordPopupRef.current.closed) discordPopupRef.current.close();
+            discordPopupRef.current = null;
           }
         } catch {}
       }, 2000);
-      setTimeout(() => { if (discordPollRef.current) { clearInterval(discordPollRef.current); setDiscordLinking(false); } }, 600_000);
+      setTimeout(() => { if (discordPollRef.current) { clearInterval(discordPollRef.current); setDiscordLinking(false); discordPopupRef.current = null; } }, 600_000);
     } catch (e) { setError(e.message); setBusy(false); }
   };
 
@@ -1996,8 +1998,9 @@ function ExportModal({ wallet, orchestrator, activeDelegation, cutsHistory, onCl
       const batch = res.data || [];
       all = [...all, ...batch];
       cursor = res.next_cursor || null;
-      if (batch.length > 0 && new Date(batch[batch.length - 1].block_timestamp) < fromDate) break;
-    } while (cursor && all.length < 1000);
+      if (batch.length === 0) break; // no more data
+      if (new Date(batch[batch.length - 1].block_timestamp) < fromDate) break;
+    } while (cursor && all.length < 2000);
     return all.filter(ev => new Date(ev.block_timestamp) >= fromDate);
   };
 
