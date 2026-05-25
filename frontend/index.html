@@ -622,19 +622,21 @@ function App() {
       const browserPrefs = S.getBrowserPrefs();
       const now = new Date();
       if (prevSnap?.cuts && cutsData.length > 0 && prevSnap.cuts.length > 0) {
-        if (cutsData[0].event_id !== prevSnap.cuts[0].event_id) {
-          if (cutsData[0].reward_cut_percent !== prevSnap.cuts[0].reward_cut_percent) {
-            const up = Number(cutsData[0].reward_cut_percent) > Number(prevSnap.cuts[0].reward_cut_percent);
-            const msg = `Reward cut ${up?"↑":"↓"}: ${pct(prevSnap.cuts[0].reward_cut_percent)} → ${pct(cutsData[0].reward_cut_percent)}`;
+        const latestCut = cutsData[cutsData.length - 1];
+        const prevCut = prevSnap.cuts[prevSnap.cuts.length - 1];
+        if (latestCut.event_id !== prevCut.event_id) {
+          if (latestCut.reward_cut_percent !== prevCut.reward_cut_percent) {
+            const up = Number(latestCut.reward_cut_percent) > Number(prevCut.reward_cut_percent);
+            const msg = `Reward cut ${up?"↑":"↓"}: ${pct(prevCut.reward_cut_percent)} → ${pct(latestCut.reward_cut_percent)}`;
             localAlerts.push({ id: Date.now()+1, type: up?"warn":"good", icon: up?"⚠️":"✅",
               msg, time: fmtDateTime(now) });
             if (browserPrefs.enabled && browserPrefs.reward_cut) {
               showBrowserNotification(`${up?"⚠️":"✅"} LiveWatch — Reward Cut ${up?"Increased":"Decreased"}`, msg, "reward_cut");
             }
           }
-          if (cutsData[0].fee_cut_percent !== prevSnap.cuts[0].fee_cut_percent) {
-            const up = Number(cutsData[0].fee_cut_percent) > Number(prevSnap.cuts[0].fee_cut_percent);
-            const msg = `Fee cut ${up?"↑":"↓"}: ${pct(prevSnap.cuts[0].fee_cut_percent)} → ${pct(cutsData[0].fee_cut_percent)}`;
+          if (latestCut.fee_cut_percent !== prevCut.fee_cut_percent) {
+            const up = Number(latestCut.fee_cut_percent) > Number(prevCut.fee_cut_percent);
+            const msg = `Fee cut ${up?"↑":"↓"}: ${pct(prevCut.fee_cut_percent)} → ${pct(latestCut.fee_cut_percent)}`;
             localAlerts.push({ id: Date.now()+2, type: up?"warn":"good", icon: up?"⚠️":"✅",
               msg, time: fmtDateTime(now) });
             if (browserPrefs.enabled && browserPrefs.fee_cut) {
@@ -684,7 +686,7 @@ function App() {
         try {
           const rewardRes = await api(`/events`, {
             contract: "BondingManager", event_name: "Reward",
-            address: orchAddr, sort: "block_number_desc", limit: 1,
+            address: orchAddr, sort: "block_desc", limit: 1,
             with_valuations: true,
           });
           const latestReward = (rewardRes?.data || [])[0];
