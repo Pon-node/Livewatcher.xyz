@@ -1573,11 +1573,27 @@ function NetworkMetricsTable({ networkStats, treasuryLpt, lptPriceUsd, onSelectM
           setPrevTreasuryLpt(treasuryHistory[treasuryHistory.length - 2].balance);
         }
 
+        // Fallback to direct Livepeer API if KV not seeded yet
+        let payoutsSpark = daily.map(d => ({ x: d.date, y: d.payouts_usd }));
+        let rewardsSpark = daily.map(d => ({ x: d.date, y: d.rewards_usd }));
+        if (payoutsSpark.length === 0) {
+          const today30 = new Date(); const from30 = new Date(); from30.setDate(from30.getDate() - 30);
+          const fromStr = from30.toISOString().slice(0, 10); const toStr = today30.toISOString().slice(0, 10);
+          const [pa, ra] = await Promise.all([
+            api(`/aggregations/events`, { contract: "TicketBroker", event_name: "WinningTicketRedeemed",
+              bucket: "day", metric: "sum_amount_usd", from: fromStr, to: toStr }).catch(() => null),
+            api(`/aggregations/events`, { contract: "BondingManager", event_name: "Reward",
+              bucket: "day", metric: "sum_amount_usd", from: fromStr, to: toStr }).catch(() => null),
+          ]);
+          payoutsSpark = (pa?.results || []).map(b => ({ x: b.bucket_start, y: Number(b.value || 0) }));
+          rewardsSpark = (ra?.results || []).map(b => ({ x: b.bucket_start, y: Number(b.value || 0) }));
+        }
+
         setSparks({
           active_orchs: rounds.map(r => ({ x: r.started_at, y: r.active_orchestrators })),
           total_stake: rounds.map(r => ({ x: r.started_at, y: Number(r.total_lpt_staked) })),
-          payouts: daily.map(d => ({ x: d.date, y: d.payouts_usd })),
-          rewards: daily.map(d => ({ x: d.date, y: d.rewards_usd })),
+          payouts: payoutsSpark,
+          rewards: rewardsSpark,
           treasury: treasuryHistory.map(t => ({ x: t.date, y: t.balance })),
         });
       } catch (e) { console.warn("Metrics fetch failed:", e.message); }
@@ -1726,9 +1742,19 @@ function MetricChartModal({ metric, lptPriceUsd, onClose }) {
             series = finalRounds.map(r => ({ x: r.started_at, y: r.active_orchestrators }));
           }
         } else if (metric.key === "payouts" || metric.key === "rewards") {
-          const res = await backend(`/daily/history?days=${rangeDays}`);
+          const histRes = await backend(`/daily/history?days=${rangeDays}`).catch(() => null);
           const field = metric.key === "payouts" ? "payouts_usd" : "rewards_usd";
-          series = (res?.history || []).map(d => ({ x: d.date, y: d[field] }));
+          series = (histRes?.history || []).map(d => ({ x: d.date, y: d[field] }));
+          if (series.length === 0) {
+            // Fallback to Livepeer API when KV not seeded
+            const eventName = metric.key === "payouts" ? "WinningTicketRedeemed" : "Reward";
+            const contract = metric.key === "payouts" ? "TicketBroker" : "BondingManager";
+            const res = await api(`/aggregations/events`, {
+              contract, event_name: eventName, bucket: "day", metric: "sum_amount_usd",
+              from: from.toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10),
+            }).catch(() => null);
+            series = (res?.results || []).map(b => ({ x: b.bucket_start, y: Number(b.value || 0) }));
+          }
         } else if (metric.key === "treasury") {
           const res = await backend(`/treasury/history?days=${rangeDays}`);
           series = (res?.history || []).map(t => ({ x: t.date, y: t.balance }));
