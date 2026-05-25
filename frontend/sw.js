@@ -6,7 +6,7 @@ const ARB_RPCS = [
 ];
 const BONDING_MANAGER = "0x35Bcf3c30594191d53231e4ff333e8a770453e40";
 const ROUNDS_MANAGER  = "0xdd6f56DcC28D3F5f27084381fE8Df634985cc39f";
-const CACHE_NAME = "livewatch-v1";
+const CACHE_NAME = "livewatch-v2";
 const SHELL = ["./", "./manifest.json"];
 
 // ── Install: cache app shell ─────────────────────────────────────────────────

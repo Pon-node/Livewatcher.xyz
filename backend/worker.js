@@ -42,12 +42,20 @@ const ARB_RPCS = [
   "https://arb1.arbitrum.io/rpc",
 ];
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Client-Id, X-Tg-User-Id",
-  "Access-Control-Max-Age": "86400",
-};
+const ALLOWED_ORIGINS = ["https://livewatcher.xyz", "https://pon-node.github.io"];
+
+function corsHeaders(requestOrigin) {
+  const origin = ALLOWED_ORIGINS.includes(requestOrigin) ? requestOrigin : ALLOWED_ORIGINS[0];
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, X-Client-Id, X-Tg-User-Id",
+    "Access-Control-Max-Age": "86400",
+    "Vary": "Origin",
+  };
+}
+// Legacy alias used by json()/err() helpers — patched per-request in the fetch handler
+let CORS_HEADERS = corsHeaders("https://livewatcher.xyz");
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -639,6 +647,9 @@ async function handleRequest(request, env) {
   const path = url.pathname;
   const method = request.method;
 
+  // Set CORS headers scoped to this request's origin
+  CORS_HEADERS = corsHeaders(request.headers.get("Origin") || "");
+
   if (method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
 
   // POST /subscriptions
@@ -748,7 +759,7 @@ async function handleRequest(request, env) {
   // POST /discord/link — generate OAuth state, return authorization URL
   if (method === "POST" && path === "/discord/link") {
     if (!env.DISCORD_CLIENT_ID) return err("Discord not configured (missing DISCORD_CLIENT_ID)");
-    const state = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+    const state = crypto.randomUUID(); // full 128-bit UUID
     await env.CODES.put(`discord_state:${state}`, "", { expirationTtl: 600 });
     const origin = new URL(request.url).origin;
     const params = new URLSearchParams({
@@ -808,6 +819,7 @@ async function handleRequest(request, env) {
     try {
       const data = JSON.parse(val);
       if (!data.discord_user_id) return json({ linked: false });
+      await env.CODES.delete(`discord_state:${state}`); // consume — prevent replay
       return json({ linked: true, ...data });
     } catch { return json({ linked: false }); }
   }
