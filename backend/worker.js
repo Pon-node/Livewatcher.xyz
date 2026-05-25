@@ -629,6 +629,36 @@ async function getTreasuryHistory(env, days = 90) {
     .slice(-days);
 }
 
+async function snapshotDailyStats(env) {
+  // Store yesterday's completed payouts + rewards (USD valuations are ready for previous days)
+  const yesterday = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
+  const today = todayKey();
+  const key = `daily:${yesterday}`;
+  if (await env.SUBS.get(key)) return;
+  const [payRes, rewRes] = await Promise.all([
+    lp(env, "/aggregations/events", { contract: "TicketBroker", event_name: "WinningTicketRedeemed",
+      bucket: "day", metric: "sum_amount_usd", from: yesterday, to: today }).catch(() => null),
+    lp(env, "/aggregations/events", { contract: "BondingManager", event_name: "Reward",
+      bucket: "day", metric: "sum_amount_usd", from: yesterday, to: today }).catch(() => null),
+  ]);
+  const payouts_usd = (payRes?.results || []).reduce((s, b) => s + Number(b.value || 0), 0);
+  const rewards_usd = (rewRes?.results || []).reduce((s, b) => s + Number(b.value || 0), 0);
+  await env.SUBS.put(key, JSON.stringify({ date: yesterday, payouts_usd, rewards_usd }), { expirationTtl: 95 * 86400 });
+  console.log(`Daily stats: ${yesterday} payouts=$${payouts_usd.toFixed(2)} rewards=$${rewards_usd.toFixed(2)}`);
+}
+
+async function getDailyHistory(env, days = 90) {
+  const list = await env.SUBS.list({ prefix: "daily:" });
+  const records = [];
+  for (const k of list.keys) {
+    const val = await env.SUBS.get(k.name, "json");
+    if (val) records.push(val);
+  }
+  return records
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-days);
+}
+
 async function runCron(env) {
   const subs = await listAllSubs(env);
   console.log(`Cron: ${subs.length} subscriptions to check`);
@@ -636,9 +666,10 @@ async function runCron(env) {
     const events = await checkSubscription(env, sub);
     for (const ev of events) await dispatch(env, sub, ev.title, ev.message);
   }
-  // Once-a-day treasury snapshot (idempotent; only writes if today's snapshot doesn't exist)
   try { await snapshotTreasury(env); }
   catch (e) { console.error("Treasury snapshot failed:", e.message); }
+  try { await snapshotDailyStats(env); }
+  catch (e) { console.error("Daily stats snapshot failed:", e.message); }
 }
 
 // ─── HTTP routes ─────────────────────────────────────────────────────────────
@@ -1090,6 +1121,45 @@ async function handleRequest(request, env) {
       return json({ history: refreshed });
     }
     return json({ history });
+  }
+
+  // GET /daily/history?days=90 — historical daily payouts + rewards from KV
+  if (method === "GET" && path === "/daily/history") {
+    const days = Math.min(Math.max(parseInt(url.searchParams.get("days") || "90"), 1), 365);
+    const yesterday = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
+    let history = await getDailyHistory(env, days);
+    if (history.length === 0 || history[history.length - 1].date !== yesterday) {
+      try { await snapshotDailyStats(env); } catch (e) { console.warn("Inline daily snapshot failed:", e.message); }
+      history = await getDailyHistory(env, days);
+    }
+    return json({ history });
+  }
+
+  // POST /daily/backfill?days=90 — one-time bulk seed from Livepeer API (safe to re-run)
+  if (method === "POST" && path === "/daily/backfill") {
+    const days = Math.min(parseInt(url.searchParams.get("days") || "90"), 365);
+    const toDate = todayKey();
+    const fromDate = new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
+    const [payRes, rewRes] = await Promise.all([
+      lp(env, "/aggregations/events", { contract: "TicketBroker", event_name: "WinningTicketRedeemed",
+        bucket: "day", metric: "sum_amount_usd", from: fromDate, to: toDate }).catch(() => null),
+      lp(env, "/aggregations/events", { contract: "BondingManager", event_name: "Reward",
+        bucket: "day", metric: "sum_amount_usd", from: fromDate, to: toDate }).catch(() => null),
+    ]);
+    const payByDate = Object.fromEntries((payRes?.results || []).map(b => [b.bucket_start, Number(b.value || 0)]));
+    const rewByDate = Object.fromEntries((rewRes?.results || []).map(b => [b.bucket_start, Number(b.value || 0)]));
+    const allDates = new Set([...Object.keys(payByDate), ...Object.keys(rewByDate)]);
+    let count = 0;
+    for (const date of allDates) {
+      if (date >= toDate) continue; // skip today — bucket not complete
+      await env.SUBS.put(`daily:${date}`, JSON.stringify({
+        date,
+        payouts_usd: payByDate[date] || 0,
+        rewards_usd: rewByDate[date] || 0,
+      }), { expirationTtl: 95 * 86400 });
+      count++;
+    }
+    return json({ ok: true, populated: count, from: fromDate, to: toDate });
   }
 
   // POST /debug/trigger?sub_id=... — manually run check for one sub (or all) without waiting for cron
