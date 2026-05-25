@@ -22,13 +22,11 @@
  *   KV: CODES  (Telegram linking codes - short TTL)
  *   SECRET: TELEGRAM_BOT_TOKEN
  *
- * Future: a new channel like "discord" plugs in by:
- *   - adding a sendDiscord(env, sub, ...) function
- *   - adding "discord" to the ALLOWED_CHANNELS array
- *   - extending dispatch() to route to it
+ * Channels: telegram, email (Resend), discord (webhook)
+ *   Secrets: TELEGRAM_BOT_TOKEN, RESEND_API_KEY
  */
 
-const ALLOWED_CHANNELS = ["telegram"]; // add "discord" later
+const ALLOWED_CHANNELS = ["telegram", "email", "discord"];
 const MAX_SUBS_PER_CLIENT = 50;
 
 // Livepeer Treasury contract (LivepeerGovernor on Arbitrum)
@@ -180,6 +178,46 @@ async function sendTelegram(env, chatId, text, opts = {}) {
   return res.ok;
 }
 
+async function sendEmail(env, toEmail, subject, text) {
+  if (!env.RESEND_API_KEY) { console.warn("RESEND_API_KEY not set"); return false; }
+  const safeHtml = text
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\n/g, "<br>");
+  const html = `<!DOCTYPE html><html><body style="background:#050a0e;color:#e8f4f0;font-family:monospace;padding:24px;max-width:600px">
+<p style="font-size:16px;font-weight:700;color:#00e5a0">${subject.replace(/&/g,"&amp;").replace(/</g,"&lt;")}</p>
+<div style="font-size:14px;line-height:1.7">${safeHtml}</div>
+<hr style="border:none;border-top:1px solid #1a2830;margin:24px 0">
+<p style="font-size:11px;color:#4a7a8a">LiveWatch &middot; <a href="https://livewatcher.xyz" style="color:#00b8ff">livewatcher.xyz</a></p>
+</body></html>`;
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.RESEND_API_KEY}` },
+    body: JSON.stringify({ from: "LiveWatch <alerts@livewatcher.xyz>", to: [toEmail], subject, html }),
+  });
+  if (!res.ok) console.warn(`Email send failed: ${res.status} ${await res.text()}`);
+  return res.ok;
+}
+
+async function sendDiscord(env, webhookUrl, title, message) {
+  const res = await fetch(webhookUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      embeds: [{
+        title,
+        description: message,
+        color: 0x00e5a0,
+        footer: { text: "LiveWatch · livewatcher.xyz" },
+        timestamp: new Date().toISOString(),
+      }],
+    }),
+  });
+  if (!res.ok) console.warn(`Discord send failed: ${res.status} ${await res.text()}`);
+  return res.ok;
+}
+
 async function editTelegram(env, chatId, messageId, text, replyMarkup) {
   const url = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/editMessageText`;
   const res = await fetch(url, {
@@ -270,6 +308,12 @@ async function dispatch(env, sub, title, message) {
   if (sub.channel === "telegram" && sub.telegram_chat_id) {
     return sendTelegram(env, sub.telegram_chat_id, text);
   }
+  if (sub.channel === "email" && sub.email_address) {
+    return sendEmail(env, sub.email_address, title, text);
+  }
+  if (sub.channel === "discord" && sub.discord_webhook_url) {
+    return sendDiscord(env, sub.discord_webhook_url, title, text);
+  }
   return false;
 }
 
@@ -354,9 +398,10 @@ async function checkSubscription(env, sub) {
       if (latestCut.event_id !== prevSnap.latest_cut_event_id &&
           latestCut.reward_cut_percent !== prevSnap.reward_cut_percent) {
         const up = Number(latestCut.reward_cut_percent) > Number(prevSnap.reward_cut_percent);
+        const rcRound = blockToRound(latestCut.block_number);
         events.push({
           title: `${up ? "⚠️" : "✅"} Reward Cut ${up ? "Increased" : "Decreased"}`,
-          message: `Orchestrator \`${orch.display_name || orchAddr.slice(0, 10)}\` changed reward cut from **${Number(prevSnap.reward_cut_percent).toFixed(2)}%** → **${Number(latestCut.reward_cut_percent).toFixed(2)}%**`,
+          message: `Orchestrator \`${orch.display_name || orchAddr.slice(0, 10)}\` changed reward cut from **${Number(prevSnap.reward_cut_percent).toFixed(2)}%** → **${Number(latestCut.reward_cut_percent).toFixed(2)}%**` + (rcRound ? ` (round **${rcRound}**)` : ""),
         });
       }
     }
@@ -366,9 +411,10 @@ async function checkSubscription(env, sub) {
       if (latestCut.event_id !== prevSnap.latest_cut_event_id &&
           latestCut.fee_cut_percent !== prevSnap.fee_cut_percent) {
         const up = Number(latestCut.fee_cut_percent) > Number(prevSnap.fee_cut_percent);
+        const fcRound = blockToRound(latestCut.block_number);
         events.push({
           title: `${up ? "⚠️" : "✅"} Fee Cut ${up ? "Increased" : "Decreased"}`,
-          message: `Orchestrator \`${orch.display_name || orchAddr.slice(0, 10)}\` changed fee cut from **${Number(prevSnap.fee_cut_percent).toFixed(2)}%** → **${Number(latestCut.fee_cut_percent).toFixed(2)}%**`,
+          message: `Orchestrator \`${orch.display_name || orchAddr.slice(0, 10)}\` changed fee cut from **${Number(prevSnap.fee_cut_percent).toFixed(2)}%** → **${Number(latestCut.fee_cut_percent).toFixed(2)}%**` + (fcRound ? ` (round **${fcRound}**)` : ""),
         });
       }
     }
@@ -570,12 +616,14 @@ async function handleRequest(request, env) {
   // POST /subscriptions
   if (method === "POST" && path === "/subscriptions") {
     const body = await request.json().catch(() => ({}));
-    const { client_id, tg_user_id, wallet, channel, notify_reward_cut, notify_fee_cut, notify_missed_reward, notify_claim_report, telegram_chat_id } = body;
+    const { client_id, tg_user_id, wallet, channel, notify_reward_cut, notify_fee_cut, notify_missed_reward, notify_claim_report, telegram_chat_id, email_address, discord_webhook_url } = body;
 
     if (!isUuid(client_id)) return err("Invalid client_id");
     if (!wallet || !/^0x[a-f0-9]{40}$/i.test(wallet)) return err("Invalid wallet address");
     if (!ALLOWED_CHANNELS.includes(channel)) return err(`Channel must be one of: ${ALLOWED_CHANNELS.join(", ")}`);
     if (channel === "telegram" && !telegram_chat_id) return err("telegram_chat_id required for Telegram channel");
+    if (channel === "email" && !email_address) return err("email_address required for email channel");
+    if (channel === "discord" && !discord_webhook_url) return err("discord_webhook_url required for Discord channel");
     if (!notify_reward_cut && !notify_fee_cut && !notify_missed_reward && !notify_claim_report) return err("Select at least one notification type");
 
     const existing = await listSubsByClient(env, client_id);
@@ -588,6 +636,8 @@ async function handleRequest(request, env) {
       wallet: wallet.toLowerCase(),
       channel,
       telegram_chat_id: telegram_chat_id || null,
+      email_address: email_address || null,
+      discord_webhook_url: discord_webhook_url || null,
       notify_reward_cut: !!notify_reward_cut,
       notify_fee_cut: !!notify_fee_cut,
       notify_missed_reward: !!notify_missed_reward,

@@ -28,3 +28,4 @@ id = "9cccd98c1c7847c9aa7cae2d220e97d3"
 
 # ───── Secrets (set via CLI, NOT here) ─────
 # Run: wrangler secret put TELEGRAM_BOT_TOKEN
+# Run: wrangler secret put RESEND_API_KEY        (required for email notifications)

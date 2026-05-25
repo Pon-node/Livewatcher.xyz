@@ -1100,7 +1100,7 @@ function SettingsModal({ onClose, onSave }) {
 }
 
 function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, setError, setSuccess }) {
-  const [section, setSection] = useState("telegram"); // 'telegram' | 'browser'
+  const [section, setSection] = useState("telegram"); // 'telegram' | 'email' | 'discord' | 'browser'
   const [channel, setChannel] = useState("telegram");
   const [notify, setNotify] = useState({ reward_cut: true, fee_cut: true, missed_reward: true, claim_report: false });
   const [tgCode, setTgCode] = useState(null);
@@ -1108,6 +1108,8 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
   const [tgChatId, setTgChatId] = useState(S.getLinked()?.chat_id || null);
   const [tgUsername, setTgUsername] = useState(S.getLinked()?.username || null);
   const [polling, setPolling] = useState(false);
+  const [emailAddress, setEmailAddress] = useState("");
+  const [discordWebhook, setDiscordWebhook] = useState("");
   const [busy, setBusy] = useState(false);
   const [browserPrefs, setBrowserPrefs] = useState(S.getBrowserPrefs());
   const [permission, setPermission] = useState(notifPermission());
@@ -1136,25 +1138,38 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
   };
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
-  const createSub = async () => {
+  const createSub = async (ch) => {
     if (!notify.reward_cut && !notify.fee_cut && !notify.missed_reward && !notify.claim_report) {
       setError("Select at least one notification type."); return;
+    }
+    if (ch === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddress)) {
+      setError("Enter a valid email address."); return;
+    }
+    if (ch === "discord" && !discordWebhook.startsWith("https://discord.com/api/webhooks/")) {
+      setError("Enter a valid Discord webhook URL (starts with https://discord.com/api/webhooks/)."); return;
     }
     try {
       setBusy(true);
       const body = {
         client_id: CLIENT_ID,
         tg_user_id: tgUser?.id || null,
-        wallet, channel,
+        wallet, channel: ch,
         notify_reward_cut: notify.reward_cut,
         notify_fee_cut: notify.fee_cut,
         notify_missed_reward: notify.missed_reward,
         notify_claim_report: notify.claim_report,
-        telegram_chat_id: tgChatId,
+        telegram_chat_id: ch === "telegram" ? tgChatId : null,
+        email_address: ch === "email" ? emailAddress.trim() : null,
+        discord_webhook_url: ch === "discord" ? discordWebhook.trim() : null,
       };
       await backend("/subscriptions", { method: "POST", body: JSON.stringify(body) });
-      setSuccess("Subscription created! Check Telegram for confirmation.");
-      setTimeout(() => setSuccess(null), 4000);
+      const confirmMsg = ch === "telegram"
+        ? "Subscription created! Check Telegram for confirmation."
+        : ch === "email"
+        ? `Subscription created! A confirmation will be sent to ${emailAddress}.`
+        : "Subscription created! Test message sent to your Discord channel.";
+      setSuccess(confirmMsg);
+      setTimeout(() => setSuccess(null), 5000);
       onChange();
     } catch (e) { setError(e.message); }
     finally { setBusy(false); }
@@ -1186,18 +1201,41 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
     updateBrowserPrefs({ enabled });
   };
 
-  const canSubmit = channel === "telegram" && !!tgChatId;
+  const notifyCheckboxes = (
+    <div className="form-group">
+      <label className="form-label">Alert Types</label>
+      <div className="checkbox-group">
+        <label className="checkbox-item">
+          <input type="checkbox" checked={notify.reward_cut} onChange={e => setNotify(n => ({ ...n, reward_cut: e.target.checked }))} />
+          <div className="ck-text"><div className="ck-title">Reward cut changes</div><div className="ck-desc">When the orchestrator changes the % they keep from inflation rewards.</div></div>
+        </label>
+        <label className="checkbox-item">
+          <input type="checkbox" checked={notify.fee_cut} onChange={e => setNotify(n => ({ ...n, fee_cut: e.target.checked }))} />
+          <div className="ck-text"><div className="ck-title">Fee cut changes</div><div className="ck-desc">When the orchestrator adjusts the % they keep from transcoding fees.</div></div>
+        </label>
+        <label className="checkbox-item">
+          <input type="checkbox" checked={notify.missed_reward} onChange={e => setNotify(n => ({ ...n, missed_reward: e.target.checked }))} />
+          <div className="ck-text"><div className="ck-title">Reward not claimed</div><div className="ck-desc">When the orchestrator misses calling reward() for a round.</div></div>
+        </label>
+        <label className="checkbox-item">
+          <input type="checkbox" checked={notify.claim_report} onChange={e => setNotify(n => ({ ...n, claim_report: e.target.checked }))} />
+          <div className="ck-text"><div className="ck-title">Round claim reports</div><div className="ck-desc">Per-round breakdown: total minted LPT, orch/delegator shares, your share, USD value.</div></div>
+        </label>
+      </div>
+    </div>
+  );
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-title">Notifications</div>
-        <div className="modal-subtitle">Choose how you want to be alerted for <code style={{color:"var(--accent)"}}>{shortAddr(wallet)}</code>. Telegram works 24/7; browser notifications only fire while the page is loaded.</div>
+        <div className="modal-subtitle">Choose how to be alerted for <code style={{color:"var(--accent)"}}>{shortAddr(wallet)}</code>.</div>
 
-        {/* Section tabs */}
         <div className="channel-tabs">
           <button className={`channel-tab ${section === "telegram" ? "active" : ""}`} onClick={() => setSection("telegram")}>📱 Telegram</button>
+          <button className={`channel-tab ${section === "email" ? "active" : ""}`} onClick={() => setSection("email")}>📧 Email</button>
+          <button className={`channel-tab ${section === "discord" ? "active" : ""}`} onClick={() => setSection("discord")}>🎮 Discord</button>
           <button className={`channel-tab ${section === "browser" ? "active" : ""}`} onClick={() => setSection("browser")}>🌐 Browser</button>
         </div>
 
@@ -1206,7 +1244,7 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
             {subscriptions.length > 0 && (
               <div className="form-group">
                 <label className="form-label">Your Active Telegram Subscriptions</label>
-                {subscriptions.map(s => (
+                {subscriptions.filter(s => s.channel === "telegram" || !s.channel).map(s => (
                   <div className="sub-item" key={s.id}>
                     <span className="sub-channel-icon">📱</span>
                     <div className="sub-info">
@@ -1217,7 +1255,9 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
                         {s.notify_missed_reward ? " · Missed reward" : ""}
                         {s.notify_claim_report ? " · Claim reports" : ""}
                       </div>
-                      <div className="sub-meta">Telegram chat {s.telegram_chat_id}</div>
+                      <div className="sub-meta">
+                    {s.channel === "telegram" ? `Telegram chat ${s.telegram_chat_id}` : s.channel === "email" ? `Email: ${s.email_address}` : s.channel === "discord" ? "Discord webhook" : s.channel}
+                  </div>
                     </div>
                     <button className="btn-ghost danger" onClick={() => deleteSub(s.id)}>✕ Remove</button>
                   </div>
@@ -1248,48 +1288,68 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
               )}
             </div>
 
-            <div className="form-group">
-              <label className="form-label">Alert Notifications</label>
-              <div className="checkbox-group">
-                <label className="checkbox-item">
-                  <input type="checkbox" checked={notify.reward_cut} onChange={e => setNotify(n => ({ ...n, reward_cut: e.target.checked }))} />
-                  <div className="ck-text">
-                    <div className="ck-title">Reward cut changes</div>
-                    <div className="ck-desc">When the orchestrator changes the % they keep from inflation rewards.</div>
-                  </div>
-                </label>
-                <label className="checkbox-item">
-                  <input type="checkbox" checked={notify.fee_cut} onChange={e => setNotify(n => ({ ...n, fee_cut: e.target.checked }))} />
-                  <div className="ck-text">
-                    <div className="ck-title">Fee cut changes</div>
-                    <div className="ck-desc">When the orchestrator adjusts the % they keep from transcoding fees.</div>
-                  </div>
-                </label>
-                <label className="checkbox-item">
-                  <input type="checkbox" checked={notify.missed_reward} onChange={e => setNotify(n => ({ ...n, missed_reward: e.target.checked }))} />
-                  <div className="ck-text">
-                    <div className="ck-title">Reward not claimed</div>
-                    <div className="ck-desc">When the orchestrator misses calling reward() — you lose inflation rewards for that round.</div>
-                  </div>
-                </label>
-              </div>
-            </div>
+            {notifyCheckboxes}
 
-            <div className="form-group">
-              <label className="form-label">Detailed Claim Reports</label>
-              <div className="checkbox-group">
-                <label className="checkbox-item">
-                  <input type="checkbox" checked={notify.claim_report} onChange={e => setNotify(n => ({ ...n, claim_report: e.target.checked }))} />
-                  <div className="ck-text">
-                    <div className="ck-title">Round claim reports</div>
-                    <div className="ck-desc">When the orchestrator successfully claims rewards for a round, get a breakdown: total minted LPT, orchestrator share, delegators share, your share, and USD value at time of claim.</div>
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            <button className="btn" onClick={createSub} disabled={!canSubmit || busy} style={{width:"100%"}}>
+            <button className="btn" onClick={() => createSub("telegram")} disabled={!tgChatId || busy} style={{width:"100%"}}>
               {busy ? <><span className="spinner" />Creating…</> : "Subscribe via Telegram"}
+            </button>
+          </>
+        )}
+
+        {section === "email" && (
+          <>
+            {subscriptions.filter(s => s.channel === "email").length > 0 && (
+              <div className="form-group">
+                <label className="form-label">Active Email Subscriptions</label>
+                {subscriptions.filter(s => s.channel === "email").map(s => (
+                  <div className="sub-item" key={s.id}>
+                    <span className="sub-channel-icon">📧</span>
+                    <div className="sub-info">
+                      <div className="sub-title">{shortAddr(s.wallet)}{s.notify_reward_cut ? " · Reward cut" : ""}{s.notify_fee_cut ? " · Fee cut" : ""}{s.notify_missed_reward ? " · Missed reward" : ""}{s.notify_claim_report ? " · Claim reports" : ""}</div>
+                      <div className="sub-meta">{s.email_address}</div>
+                    </div>
+                    <button className="btn-ghost danger" onClick={() => deleteSub(s.id)}>✕ Remove</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="form-group">
+              <label className="form-label">Email Address</label>
+              <input className="form-input" type="email" placeholder="you@example.com" value={emailAddress} onChange={e => setEmailAddress(e.target.value)} />
+              <div className="form-help">Alerts sent via <a href="https://resend.com" target="_blank">Resend</a>. Requires <code>RESEND_API_KEY</code> set on the backend and domain <code>livewatcher.xyz</code> verified in Resend.</div>
+            </div>
+            {notifyCheckboxes}
+            <button className="btn" onClick={() => createSub("email")} disabled={!emailAddress || busy} style={{width:"100%"}}>
+              {busy ? <><span className="spinner" />Creating…</> : "Subscribe via Email"}
+            </button>
+          </>
+        )}
+
+        {section === "discord" && (
+          <>
+            {subscriptions.filter(s => s.channel === "discord").length > 0 && (
+              <div className="form-group">
+                <label className="form-label">Active Discord Subscriptions</label>
+                {subscriptions.filter(s => s.channel === "discord").map(s => (
+                  <div className="sub-item" key={s.id}>
+                    <span className="sub-channel-icon">🎮</span>
+                    <div className="sub-info">
+                      <div className="sub-title">{shortAddr(s.wallet)}{s.notify_reward_cut ? " · Reward cut" : ""}{s.notify_fee_cut ? " · Fee cut" : ""}{s.notify_missed_reward ? " · Missed reward" : ""}{s.notify_claim_report ? " · Claim reports" : ""}</div>
+                      <div className="sub-meta">Discord webhook</div>
+                    </div>
+                    <button className="btn-ghost danger" onClick={() => deleteSub(s.id)}>✕ Remove</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="form-group">
+              <label className="form-label">Discord Webhook URL</label>
+              <input className="form-input" type="url" placeholder="https://discord.com/api/webhooks/…" value={discordWebhook} onChange={e => setDiscordWebhook(e.target.value)} />
+              <div className="form-help">In Discord: channel settings → Integrations → Webhooks → New Webhook → Copy Webhook URL.</div>
+            </div>
+            {notifyCheckboxes}
+            <button className="btn" onClick={() => createSub("discord")} disabled={!discordWebhook || busy} style={{width:"100%"}}>
+              {busy ? <><span className="spinner" />Creating…</> : "Subscribe via Discord"}
             </button>
           </>
         )}
