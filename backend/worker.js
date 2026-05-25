@@ -65,7 +65,7 @@ function json(data, status = 200) {
 }
 function err(message, status = 400) { return json({ error: message }, status); }
 function newId() { return crypto.randomUUID(); }
-function newCode() { return String(Math.floor(100000 + Math.random() * 900000)); }
+function newCode() { const arr = new Uint32Array(1); crypto.getRandomValues(arr); return String(10000000 + (arr[0] % 90000000)); }
 function todayKey() { return new Date().toISOString().slice(0, 10); }
 
 function isUuid(s) {
@@ -661,8 +661,16 @@ async function handleRequest(request, env) {
     if (!wallet || !/^0x[a-f0-9]{40}$/i.test(wallet)) return err("Invalid wallet address");
     if (!ALLOWED_CHANNELS.includes(channel)) return err(`Channel must be one of: ${ALLOWED_CHANNELS.join(", ")}`);
     if (channel === "telegram" && !telegram_chat_id) return err("telegram_chat_id required for Telegram channel");
+    if (channel === "telegram" && !/^-?\d{5,15}$/.test(String(telegram_chat_id))) return err("Invalid telegram_chat_id");
     if (channel === "email" && !email_address) return err("email_address required for email channel");
+    if (channel === "email" && !/^[^\s@]{1,64}@[^\s@]{1,255}$/.test(email_address)) return err("Invalid email_address");
     if (channel === "discord" && !discord_user_id && !discord_webhook_url) return err("discord_user_id or discord_webhook_url required for Discord channel");
+    if (discord_webhook_url) {
+      try {
+        const whu = new URL(discord_webhook_url);
+        if (whu.protocol !== "https:" || !whu.hostname.endsWith("discord.com") || !whu.pathname.startsWith("/api/webhooks/")) return err("Invalid discord_webhook_url");
+      } catch { return err("Invalid discord_webhook_url"); }
+    }
     if (!notify_reward_cut && !notify_fee_cut && !notify_missed_reward && !notify_claim_report) return err("Select at least one notification type");
 
     const existing = await listSubsByClient(env, client_id);
@@ -761,10 +769,9 @@ async function handleRequest(request, env) {
     if (!env.DISCORD_CLIENT_ID) return err("Discord not configured (missing DISCORD_CLIENT_ID)");
     const state = crypto.randomUUID(); // full 128-bit UUID
     await env.CODES.put(`discord_state:${state}`, "", { expirationTtl: 600 });
-    const origin = new URL(request.url).origin;
     const params = new URLSearchParams({
       client_id: env.DISCORD_CLIENT_ID,
-      redirect_uri: `${origin}/discord/callback`,
+      redirect_uri: "https://livewatch-backend.paulius.workers.dev/discord/callback",
       response_type: "code",
       scope: "identify applications.commands",
       integration_type: "1",  // 1 = user install (allows DMs without shared server)
@@ -782,7 +789,6 @@ async function handleRequest(request, env) {
     const stateKey = `discord_state:${state}`;
     const existing = await env.CODES.get(stateKey);
     if (existing === null) return Response.redirect(`${redirectFrontend}?discord_error=expired`, 302);
-    const origin = new URL(request.url).origin;
     // Exchange code for access token
     const tokenRes = await fetch("https://discord.com/api/v10/oauth2/token", {
       method: "POST",
@@ -792,7 +798,7 @@ async function handleRequest(request, env) {
         client_secret: env.DISCORD_CLIENT_SECRET,
         grant_type: "authorization_code",
         code,
-        redirect_uri: `${origin}/discord/callback`,
+        redirect_uri: "https://livewatch-backend.paulius.workers.dev/discord/callback",
       }),
     });
     if (!tokenRes.ok) return Response.redirect(`${redirectFrontend}?discord_error=token_exchange`, 302);

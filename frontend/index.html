@@ -1502,6 +1502,7 @@ function TelegramLoginButton({ onLogin }) {
 
   useEffect(() => {
     if (!botUsername || !containerRef.current) return;
+    if (!/^[a-zA-Z0-9_]{3,32}$/.test(botUsername)) return;
     // Expose the callback globally so Telegram's widget can call it
     window.onTelegramAuth = (user) => onLogin(user);
     // Clear previous widget

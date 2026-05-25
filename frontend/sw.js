@@ -46,7 +46,7 @@ async function ethCall(to, data) {
       });
       if (!res.ok) continue;
       const j = await res.json();
-      if (j.error || !j.result) continue;
+      if (j.error || !j.result || j.result === "0x") continue;
       return j.result;
     } catch {}
   }
