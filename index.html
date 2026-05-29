@@ -789,44 +789,70 @@ function App() {
 
   const myDelegation = delegator?.activeDelegation || delegator?.delegations?.[0];
 
-  // Per-delegator estimated earnings over 7d & 30d windows
+  // Per-delegator reward share (LPT) and ETH payout for last round / 7d / 30d.
+  // Native amounts are pulled per-day; one Reward event = one round, so the last
+  // daily bucket approximates the last round.
   useEffect(() => {
     const orchAddr = orchestrator?.address;
-    const myStake = myDelegation ? Number(myDelegation.bonded_principal) : 0;
+    const myStake = myDelegation ? Number(myDelegation.pending_stake || myDelegation.bonded_principal) : 0;
     const totalStake = orchestrator ? Number(orchestrator.total_stake) : 0;
     if (!orchAddr || !myStake || !totalStake) { setWindowEarnings(null); return; }
     let cancelled = false;
     const myShare = myStake / totalStake;
     const rewardCut = Number(orchestrator.reward_cut_percent) / 100;
+    const feeCut = Number(orchestrator.fee_cut_percent) / 100;
     const today = new Date().toISOString().slice(0, 10);
-    const sumResults = (res) => (res && res.results ? res.results.reduce((a, r) => a + (Number(r.value) || 0), 0) : 0);
-    const loadWindow = async (days) => {
-      const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
-      const [rewardRes, payoutRes] = await Promise.all([
-        api("/aggregations/events", { contract: "BondingManager", event_name: "Reward", address: orchAddr, bucket: "day", metric: "sum_amount_usd", from, to: today }).catch(() => null),
-        api("/aggregations/events", { contract: "TicketBroker", event_name: "WinningTicketRedeemed", address: orchAddr, bucket: "day", metric: "sum_amount_usd", from, to: today }).catch(() => null),
-      ]);
-      const rewards = sumResults(rewardRes) * (1 - rewardCut) * myShare;
-      const payouts = sumResults(payoutRes) * myShare;
-      return { rewards, payouts, total: rewards + payouts };
+    const from30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const loadRows = async (contract, event_name) => {
+      const res = await api("/aggregations/events", { contract, event_name, address: orchAddr, bucket: "day", metric: "sum_amount_native", from: from30, to: today }).catch(() => null);
+      const rows = res && res.results ? res.results.slice() : [];
+      rows.sort((a, b) => new Date(a.bucket_start) - new Date(b.bucket_start));
+      return rows;
     };
+    const sumLast = (rows, n) => rows.slice(-n).reduce((a, r) => a + (Number(r.value) || 0), 0);
     (async () => {
-      const [w7, w30] = await Promise.all([loadWindow(7), loadWindow(30)]);
-      if (!cancelled) setWindowEarnings({ d7: w7, d30: w30 });
+      const [rewardRows, payoutRows] = await Promise.all([
+        loadRows("BondingManager", "Reward"),
+        loadRows("TicketBroker", "WinningTicketRedeemed"),
+      ]);
+      const mk = (n) => ({
+        rewardLpt: sumLast(rewardRows, n) * (1 - rewardCut) * myShare,
+        payoutEth: sumLast(payoutRows, n) * (1 - feeCut) * myShare,
+      });
+      if (!cancelled) setWindowEarnings({ round: mk(1), d7: mk(7), d30: mk(30) });
     })();
     return () => { cancelled = true; };
   }, [orchestrator, myDelegation]);
 
+  // The net-economics endpoint returns the ORCHESTRATOR'S COMMISSION (pool gross × cut),
+  // not the pool gross. Reconstruct pool gross so both views show correct numbers.
+  const computeGrossEcon = () => {
+    if (!netEcon) return null;
+    if (!orchestrator) return netEcon;
+    const rewardCut = Number(orchestrator.reward_cut_percent) / 100;
+    const feeCut = Number(orchestrator.fee_cut_percent) / 100;
+    const grossRewards = rewardCut > 0 ? Number(netEcon.gross_rewards_usd) / rewardCut : Number(netEcon.gross_rewards_usd);
+    const grossPayouts = feeCut > 0 ? Number(netEcon.gross_payouts_usd) / feeCut : Number(netEcon.gross_payouts_usd);
+    return {
+      gross_rewards_usd: grossRewards.toString(),
+      gross_payouts_usd: grossPayouts.toString(),
+      gross_total_usd: (grossRewards + grossPayouts).toString(),
+      gas_cost_native_eth: netEcon.gas_cost_native_eth,
+      period_days: netEcon.period_days,
+    };
+  };
+
   const computeDelegatorEcon = () => {
     if (!netEcon || !orchestrator || !myDelegation) return null;
-    const myStake = Number(myDelegation.bonded_principal);
+    const myStake = Number(myDelegation.pending_stake || myDelegation.bonded_principal);
     const totalStake = Number(orchestrator.total_stake);
     if (!totalStake || totalStake === 0) return null;
     const myShare = myStake / totalStake;
     const rewardCut = Number(orchestrator.reward_cut_percent) / 100;
     const feeCut = Number(orchestrator.fee_cut_percent) / 100;
-    const myRewards = Number(netEcon.gross_rewards_usd) * (1 - rewardCut) * myShare;
-    const myPayouts = Number(netEcon.gross_payouts_usd) * (1 - feeCut) * myShare;
+    const gross = computeGrossEcon();
+    const myRewards = Number(gross.gross_rewards_usd) * (1 - rewardCut) * myShare;
+    const myPayouts = Number(gross.gross_payouts_usd) * (1 - feeCut) * myShare;
     return {
       gross_rewards_usd: myRewards.toString(),
       gross_payouts_usd: myPayouts.toString(),
@@ -835,7 +861,26 @@ function App() {
       period_days: netEcon.period_days,
     };
   };
-  const econToShow = econView === "delegator" ? computeDelegatorEcon() : netEcon;
+  const econToShow = econView === "delegator" ? computeDelegatorEcon() : computeGrossEcon();
+
+  // Direction of the most recent change for a cut field: "up" (increased, bad) or "down" (decreased, good).
+  const cutTrend = (field) => {
+    if (!cutsHistory || cutsHistory.length < 2) return null;
+    const sorted = cutsHistory.slice().sort((a, b) => {
+      const ta = a.block_timestamp ? new Date(a.block_timestamp).getTime() : Number(a.block_number || 0);
+      const tb = b.block_timestamp ? new Date(b.block_timestamp).getTime() : Number(b.block_number || 0);
+      return tb - ta;
+    });
+    const cur = Number(sorted[0][field]);
+    const prevEntry = sorted.find(c => Number(c[field]) !== cur);
+    if (!prevEntry) return null;
+    return cur > Number(prevEntry[field]) ? "up" : "down";
+  };
+  const CutArrow = ({ field }) => {
+    const t = cutTrend(field);
+    if (!t) return null;
+    return <span style={{ fontSize: 20, marginLeft: 8, color: t === "up" ? "var(--danger)" : "var(--accent)" }}>{t === "up" ? "↑" : "↓"}</span>;
+  };
 
   return (
     <div className="app">
@@ -948,8 +993,7 @@ function App() {
           <div className="card">
             <div className="card-title">Your Position</div>
             <div className="stats-grid">
-              <div className="stat"><div className="stat-label">Bonded</div><div className="stat-value accent">{lpt(myDelegation?.bonded_principal)}</div></div>
-              <div className="stat"><div className="stat-label">Pending Stake</div><div className="stat-value">{lpt(myDelegation?.pending_stake)}</div></div>
+              <div className="stat"><div className="stat-label">Stake</div><div className="stat-value accent">{lpt(myDelegation?.pending_stake || myDelegation?.bonded_principal)}</div><div className="stat-sub">Current total incl. unclaimed rewards</div></div>
               <div className="stat"><div className="stat-label">Pending Fees</div><div className="stat-value accent2">{eth(myDelegation?.pending_fees)}</div></div>
               <div className="stat"><div className="stat-label">Status</div><div className="stat-value" style={{fontSize:14, color: delegator.is_active ? "var(--accent)" : "var(--muted)"}}>{delegator.is_active ? "Active ✓" : "Inactive"}</div></div>
             </div>
@@ -958,12 +1002,12 @@ function App() {
           <div className="row">
             <div className="card">
               <div className="card-title">Reward Cut</div>
-              <div className="stat-value accent" style={{fontSize:36,fontWeight:700}}>{pct(orchestrator.reward_cut_percent)}</div>
+              <div className="stat-value accent" style={{fontSize:36,fontWeight:700}}>{pct(orchestrator.reward_cut_percent)}<CutArrow field="reward_cut_percent" /></div>
               <div className="stat-sub">% kept by orchestrator from inflation rewards</div>
             </div>
             <div className="card">
               <div className="card-title">Fee Cut</div>
-              <div className="stat-value accent2" style={{fontSize:36,fontWeight:700}}>{pct(orchestrator.fee_cut_percent)}</div>
+              <div className="stat-value accent2" style={{fontSize:36,fontWeight:700}}>{pct(orchestrator.fee_cut_percent)}<CutArrow field="fee_cut_percent" /></div>
               <div className="stat-sub">% kept by orchestrator from transcoding fees</div>
             </div>
             <div className="card">
@@ -1021,15 +1065,28 @@ function App() {
               {econView === "delegator" && (
                 <div className="card" style={{marginTop:12}}>
                   <div className="card-title">Your Earnings</div>
-                  <div className="stats-grid">
-                    {[{label:"Last 7 Days",w:windowEarnings && windowEarnings.d7},{label:"Last 30 Days",w:windowEarnings && windowEarnings.d30}].map(({label,w}) => (
-                      <div className="stat" key={label}>
-                        <div className="stat-label">{label}</div>
-                        <div className="stat-value">{w ? usd(w.total) : "—"}</div>
-                        <div className="stat-sub">{w ? `${usd(w.rewards)} rewards · ${usd(w.payouts)} payouts` : "—"}</div>
-                      </div>
-                    ))}
+                  <div className="table-wrap">
+                    <table>
+                      <thead><tr>
+                        <th></th><th style={{textAlign:"right"}}>Last Round</th><th style={{textAlign:"right"}}>7 Days</th><th style={{textAlign:"right"}}>30 Days</th>
+                      </tr></thead>
+                      <tbody>
+                        <tr>
+                          <td>Reward Share</td>
+                          <td style={{textAlign:"right"}}>{windowEarnings ? lpt(windowEarnings.round.rewardLpt, 2) : "—"}</td>
+                          <td style={{textAlign:"right"}}>{windowEarnings ? lpt(windowEarnings.d7.rewardLpt, 2) : "—"}</td>
+                          <td style={{textAlign:"right"}}>{windowEarnings ? lpt(windowEarnings.d30.rewardLpt, 2) : "—"}</td>
+                        </tr>
+                        <tr>
+                          <td>ETH Payout</td>
+                          <td style={{textAlign:"right"}}>{windowEarnings ? eth(windowEarnings.round.payoutEth) : "—"}</td>
+                          <td style={{textAlign:"right"}}>{windowEarnings ? eth(windowEarnings.d7.payoutEth) : "—"}</td>
+                          <td style={{textAlign:"right"}}>{windowEarnings ? eth(windowEarnings.d30.payoutEth) : "—"}</td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
+                  <div style={{fontSize:10,color:"var(--muted)",marginTop:8}}>Last round ≈ most recent daily reward bucket. Your share = pool gross × (1 − cut) × your stake share.</div>
                 </div>
               )}
             </div>
