@@ -803,22 +803,27 @@ function App() {
     const feeCut = Number(orchestrator.fee_cut_percent) / 100;
     const today = new Date().toISOString().slice(0, 10);
     const from30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-    const loadRows = async (contract, event_name) => {
-      const res = await api("/aggregations/events", { contract, event_name, address: orchAddr, bucket: "day", metric: "sum_amount_native", from: from30, to: today }).catch(() => null);
+    const loadRows = async (contract, event_name, metric) => {
+      const res = await api("/aggregations/events", { contract, event_name, address: orchAddr, bucket: "day", metric, from: from30, to: today }).catch(() => null);
       const rows = res && res.results ? res.results.slice() : [];
       rows.sort((a, b) => new Date(a.bucket_start) - new Date(b.bucket_start));
       return rows;
     };
     const sumLast = (rows, n) => rows.slice(-n).reduce((a, r) => a + (Number(r.value) || 0), 0);
     (async () => {
-      const [rewardRows, payoutRows] = await Promise.all([
-        loadRows("BondingManager", "Reward"),
-        loadRows("TicketBroker", "WinningTicketRedeemed"),
+      const [rewardNat, rewardUsd, payoutNat, payoutUsd] = await Promise.all([
+        loadRows("BondingManager", "Reward", "sum_amount_native"),
+        loadRows("BondingManager", "Reward", "sum_amount_usd"),
+        loadRows("TicketBroker", "WinningTicketRedeemed", "sum_amount_native"),
+        loadRows("TicketBroker", "WinningTicketRedeemed", "sum_amount_usd"),
       ]);
-      const mk = (n) => ({
-        rewardLpt: sumLast(rewardRows, n) * (1 - rewardCut) * myShare,
-        payoutEth: sumLast(payoutRows, n) * (1 - feeCut) * myShare,
-      });
+      const mk = (n) => {
+        const rewardLpt = sumLast(rewardNat, n) * (1 - rewardCut) * myShare;
+        const rewardUsdV = sumLast(rewardUsd, n) * (1 - rewardCut) * myShare;
+        const payoutEth = sumLast(payoutNat, n) * (1 - feeCut) * myShare;
+        const payoutUsdV = sumLast(payoutUsd, n) * (1 - feeCut) * myShare;
+        return { rewardLpt, rewardUsd: rewardUsdV, payoutEth, payoutUsd: payoutUsdV, totalUsd: rewardUsdV + payoutUsdV };
+      };
       if (!cancelled) setWindowEarnings({ round: mk(1), d7: mk(7), d30: mk(30) });
     })();
     return () => { cancelled = true; };
@@ -1066,27 +1071,46 @@ function App() {
                 <div className="card" style={{marginTop:12}}>
                   <div className="card-title">Your Earnings</div>
                   <div className="table-wrap">
-                    <table>
+                    <table style={{textAlign:"center"}}>
                       <thead><tr>
-                        <th></th><th style={{textAlign:"right"}}>Last Round</th><th style={{textAlign:"right"}}>7 Days</th><th style={{textAlign:"right"}}>30 Days</th>
+                        <th style={{textAlign:"center"}}></th>
+                        <th style={{textAlign:"center"}}>Last Round</th>
+                        <th style={{textAlign:"center"}}>7 Days</th>
+                        <th style={{textAlign:"center"}}>30 Days</th>
                       </tr></thead>
                       <tbody>
-                        <tr>
-                          <td>Reward Share</td>
-                          <td style={{textAlign:"right"}}>{windowEarnings ? lpt(windowEarnings.round.rewardLpt, 2) : "—"}</td>
-                          <td style={{textAlign:"right"}}>{windowEarnings ? lpt(windowEarnings.d7.rewardLpt, 2) : "—"}</td>
-                          <td style={{textAlign:"right"}}>{windowEarnings ? lpt(windowEarnings.d30.rewardLpt, 2) : "—"}</td>
-                        </tr>
-                        <tr>
-                          <td>ETH Payout</td>
-                          <td style={{textAlign:"right"}}>{windowEarnings ? eth(windowEarnings.round.payoutEth) : "—"}</td>
-                          <td style={{textAlign:"right"}}>{windowEarnings ? eth(windowEarnings.d7.payoutEth) : "—"}</td>
-                          <td style={{textAlign:"right"}}>{windowEarnings ? eth(windowEarnings.d30.payoutEth) : "—"}</td>
-                        </tr>
+                        {(() => {
+                          const periods = ["round", "d7", "d30"];
+                          const cell = (key, fmt, field, usdField) => {
+                            const w = windowEarnings && windowEarnings[key];
+                            return (
+                              <td style={{textAlign:"center"}}>
+                                {w ? fmt(w[field]) : "—"}
+                                {w && <div className="stat-sub" style={{marginTop:2}}>{usd(w[usdField])}</div>}
+                              </td>);
+                          };
+                          return (<>
+                            <tr>
+                              <td style={{textAlign:"center",fontWeight:600}}>Reward Share</td>
+                              {periods.map(p => <React.Fragment key={p}>{cell(p, (v)=>lpt(v,2), "rewardLpt", "rewardUsd")}</React.Fragment>)}
+                            </tr>
+                            <tr>
+                              <td style={{textAlign:"center",fontWeight:600}}>ETH Payout</td>
+                              {periods.map(p => <React.Fragment key={p}>{cell(p, eth, "payoutEth", "payoutUsd")}</React.Fragment>)}
+                            </tr>
+                            <tr>
+                              <td style={{textAlign:"center",fontWeight:600}}>Total</td>
+                              {periods.map(p => {
+                                const w = windowEarnings && windowEarnings[p];
+                                return <td key={p} style={{textAlign:"center",fontWeight:700,color:"var(--accent)"}}>{w ? usd(w.totalUsd) : "—"}</td>;
+                              })}
+                            </tr>
+                          </>);
+                        })()}
                       </tbody>
                     </table>
                   </div>
-                  <div style={{fontSize:10,color:"var(--muted)",marginTop:8}}>Last round ≈ most recent daily reward bucket. Your share = pool gross × (1 − cut) × your stake share.</div>
+                  <div style={{fontSize:10,color:"var(--muted)",marginTop:8,textAlign:"center"}}>Last round ≈ most recent daily reward bucket. Your share = pool gross × (1 − cut) × your stake share.</div>
                 </div>
               )}
             </div>
