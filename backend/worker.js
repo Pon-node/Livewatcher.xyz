@@ -340,12 +340,31 @@ async function sendEmail(env, toEmail, subject, text) {
 <p style="font-size:16px;font-weight:700;color:#00e5a0">${subject.replace(/&/g,"&amp;").replace(/</g,"&lt;")}</p>
 <div style="font-size:14px;line-height:1.7">${safeHtml}</div>
 <hr style="border:none;border-top:1px solid #1a2830;margin:24px 0">
-<p style="font-size:11px;color:#4a7a8a">LiveWatch &middot; <a href="https://livewatcher.xyz" style="color:#00b8ff">livewatcher.xyz</a></p>
+<p style="font-size:11px;color:#4a7a8a">LiveWatch &middot; <a href="https://livewatcher.xyz" style="color:#00b8ff">livewatcher.xyz</a><br>
+You receive this because you subscribed to LiveWatch alerts. Manage or unsubscribe at <a href="https://livewatcher.xyz" style="color:#00b8ff">livewatcher.xyz</a>.</p>
 </body></html>`;
+  // Plain-text alternative — multipart mail scores far better with spam filters
+  // than HTML-only. Strip the lightweight markdown to readable text.
+  const plain = text
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    + "\n\n—\nLiveWatch · https://livewatcher.xyz\nYou receive this because you subscribed to LiveWatch alerts. Manage or unsubscribe at https://livewatcher.xyz";
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.RESEND_API_KEY}` },
-    body: JSON.stringify({ from: "LiveWatch <alerts@livewatcher.xyz>", to: [toEmail], subject, html }),
+    body: JSON.stringify({
+      from: "LiveWatch <alerts@livewatcher.xyz>",
+      to: [toEmail],
+      reply_to: "alerts@livewatcher.xyz",
+      subject,
+      html,
+      text: plain,
+      // List-Unsubscribe materially improves inbox placement for alert mail.
+      headers: {
+        "List-Unsubscribe": "<https://livewatcher.xyz>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      },
+    }),
   });
   if (!res.ok) console.warn(`Email send failed: ${res.status} ${await res.text()}`);
   return res.ok;
