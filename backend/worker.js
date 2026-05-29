@@ -1332,8 +1332,8 @@ async function handleRequest(request, env) {
       const cmd = text.split(/\s+/)[0].toLowerCase();
       const args = text.split(/\s+/).slice(1);
 
-      // 6-digit linking code (still supported for the website's link flow)
-      if (/^\d{6}$/.test(text)) {
+      // 8-digit linking code from the website's link flow (see newCode())
+      if (/^\d{8}$/.test(text)) {
         const codeData = await env.CODES.get(`code:${text}`, "json");
         if (codeData) {
           await env.CODES.put(`code:${text}`, JSON.stringify({ ...codeData, chat_id: chatId, username }), { expirationTtl: 600 });
