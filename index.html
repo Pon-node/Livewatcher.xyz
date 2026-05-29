@@ -487,6 +487,18 @@ function App() {
   const [lastPoll, setLastPoll] = useState(null);
   const [progress, setProgress] = useState("");
   const [econView, setEconView] = useState("orchestrator");
+  // True when the watched wallet self-delegates (it IS the orchestrator).
+  const isOwnOrch = !!(activeAddr && orchestrator?.address && activeAddr.toLowerCase() === orchestrator.address.toLowerCase());
+  // Default the econ toggle to the role you're watching: a pure delegator wallet
+  // opens on "Delegator (You)", an orchestrator's own wallet on "Orchestrator".
+  // Applied once per wallet so polling/refresh doesn't clobber a manual toggle.
+  const econDefaultedRef = useRef(null);
+  useEffect(() => {
+    if (!activeAddr || !orchestrator?.address) return;
+    if (econDefaultedRef.current === activeAddr) return;
+    setEconView(isOwnOrch ? "orchestrator" : "delegator");
+    econDefaultedRef.current = activeAddr;
+  }, [activeAddr, orchestrator, isOwnOrch]);
   const [windowEarnings, setWindowEarnings] = useState(null);
   const [showNotifs, setShowNotifs] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -966,8 +978,11 @@ function App() {
               <div className="card-title">
                 <span>30-Day Net Economics</span>
                 <div className="toggle-group">
-                  <button className={`toggle-opt ${econView === "orchestrator" ? "active" : ""}`} onClick={() => setEconView("orchestrator")}>Orchestrator</button>
-                  <button className={`toggle-opt ${econView === "delegator" ? "active" : ""}`} onClick={() => setEconView("delegator")}>Delegator (You)</button>
+                  {(() => {
+                    const orchBtn = <button key="orch" className={`toggle-opt ${econView === "orchestrator" ? "active" : ""}`} onClick={() => setEconView("orchestrator")}>Orchestrator</button>;
+                    const delBtn = <button key="del" className={`toggle-opt ${econView === "delegator" ? "active" : ""}`} onClick={() => setEconView("delegator")}>Delegator (You)</button>;
+                    return isOwnOrch ? [orchBtn, delBtn] : [delBtn, orchBtn];
+                  })()}
                 </div>
               </div>
               {econToShow ? (
@@ -1158,6 +1173,9 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
   const [tgUsername, setTgUsername] = useState(S.getLinked()?.username || null);
   const [polling, setPolling] = useState(false);
   const [emailAddress, setEmailAddress] = useState("");
+  const [emailCode, setEmailCode] = useState("");
+  const [emailCodeSent, setEmailCodeSent] = useState(false);
+  const [emailSending, setEmailSending] = useState(false);
   const [discordUser, setDiscordUser] = useState(S.getDiscordUser());
   const [discordLinking, setDiscordLinking] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1188,6 +1206,17 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
     } catch (e) { setError(e.message); }
     finally { setBusy(false); }
   };
+  // Unlink Telegram: clears the stored link so the user can link a different
+  // account. Existing Telegram subscriptions are unaffected (remove them via
+  // the active-subscriptions list above).
+  const unlinkTelegram = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); setPolling(false); }
+    S.setLinked(null);
+    setTgChatId(null); setTgUsername(null); setTgCode(null);
+    setSuccess("Telegram unlinked.");
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
   useEffect(() => () => {
     if (pollRef.current) clearInterval(pollRef.current);
     if (discordPollRef.current) clearInterval(discordPollRef.current);
@@ -1242,12 +1271,32 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
     } catch (e) { setError(e.message); setBusy(false); }
   };
 
+  // Email ownership check: emails an 8-digit code the user must echo back before
+  // the subscription is created. Requires alert types + a valid address first.
+  const hasAlertType = () => notify.reward_cut || notify.fee_cut || notify.missed_reward || notify.claim_report || notify.governance || notify.weekly_digest || notify.monthly_digest;
+  const sendEmailCode = async () => {
+    if (!hasAlertType()) { setError("Select at least one notification type."); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddress)) { setError("Enter a valid email address."); return; }
+    try {
+      setEmailSending(true);
+      await backend("/email/verify/start", { method: "POST", body: JSON.stringify({ client_id: CLIENT_ID, email: emailAddress.trim() }) });
+      setEmailCodeSent(true);
+      setSuccess(`Verification code sent to ${emailAddress}. Check inbox and spam.`);
+      setTimeout(() => setSuccess(null), 6000);
+    } catch (e) { setError(e.message); }
+    finally { setEmailSending(false); }
+  };
+
   const createSub = async (ch) => {
     if (!notify.reward_cut && !notify.fee_cut && !notify.missed_reward && !notify.claim_report && !notify.governance && !notify.weekly_digest && !notify.monthly_digest) {
       setError("Select at least one notification type."); return;
     }
     if (ch === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddress)) {
       setError("Enter a valid email address."); return;
+    }
+    if (ch === "email") {
+      if (!emailCodeSent) { setError("Send the verification code first."); return; }
+      if (!/^\d{8}$/.test(emailCode.trim())) { setError("Enter the 8-digit code from your email."); return; }
     }
     if (ch === "discord" && !discordUser?.discord_user_id) {
       setError("Link your Discord account first."); return;
@@ -1267,6 +1316,7 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
         notify_monthly_digest: notify.monthly_digest,
         telegram_chat_id: ch === "telegram" ? tgChatId : null,
         email_address: ch === "email" ? emailAddress.trim() : null,
+        email_code: ch === "email" ? emailCode.trim() : null,
         discord_user_id: ch === "discord" ? discordUser?.discord_user_id : null,
         discord_username: ch === "discord" ? discordUser?.discord_username : null,
         discord_webhook_url: null,
@@ -1275,8 +1325,9 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
       const confirmMsg = ch === "telegram"
         ? "Subscription created! Check Telegram for confirmation."
         : ch === "email"
-        ? `Subscription created! A confirmation will be sent to ${emailAddress}.`
+        ? `Email verified — subscription active for ${emailAddress}.`
         : "Subscription created! Test message sent to your Discord channel.";
+      if (ch === "email") { setEmailCodeSent(false); setEmailCode(""); setEmailAddress(""); }
       setSuccess(confirmMsg);
       setTimeout(() => setSuccess(null), 5000);
       onChange();
@@ -1436,8 +1487,9 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
                 </div>
               )}
               {tgChatId && (
-                <div style={{padding:12,background:"var(--bg)",border:"1px solid var(--accent)",borderRadius:4,fontSize:12,color:"var(--accent)"}}>
-                  ✓ Linked to {tgUsername ? `@${tgUsername}` : `chat ${tgChatId}`}
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:12,background:"var(--bg)",border:"1px solid var(--accent)",borderRadius:4,fontSize:12,color:"var(--accent)"}}>
+                  <span>✓ Linked to {tgUsername ? `@${tgUsername}` : `chat ${tgChatId}`}</span>
+                  <span style={{cursor:"pointer",color:"var(--muted)",fontSize:11}} onClick={unlinkTelegram}>Unlink</span>
                 </div>
               )}
             </div>
@@ -1460,13 +1512,32 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
             )}
             <div className="form-group">
               <label className="form-label">Email Address</label>
-              <input className="form-input" type="email" placeholder="you@example.com" value={emailAddress} onChange={e => setEmailAddress(e.target.value)} />
-              <div className="form-help">Alerts are sent via <a href="https://resend.com" target="_blank">Resend</a> from <code>alerts@livewatcher.xyz</code>. Check your spam folder if the confirmation doesn't arrive.</div>
+              <input className="form-input" type="email" placeholder="you@example.com" value={emailAddress}
+                disabled={emailCodeSent}
+                onChange={e => { setEmailAddress(e.target.value); if (emailCodeSent) { setEmailCodeSent(false); setEmailCode(""); } }} />
+              <div className="form-help">Alerts are sent via <a href="https://resend.com" target="_blank">Resend</a> from <code>alerts@livewatcher.xyz</code>. Check your spam folder if the code doesn't arrive.</div>
             </div>
             {notifyCheckboxes}
-            <button className="btn" onClick={() => createSub("email")} disabled={!emailAddress || busy} style={{width:"100%"}}>
-              {busy ? <><span className="spinner" />Creating…</> : "Subscribe via Email"}
-            </button>
+            {!emailCodeSent ? (
+              <button className="btn" onClick={sendEmailCode} disabled={!emailAddress || emailSending} style={{width:"100%"}}>
+                {emailSending ? <><span className="spinner" />Sending code…</> : "Send verification code"}
+              </button>
+            ) : (
+              <>
+                <div className="form-group">
+                  <label className="form-label">Verification Code</label>
+                  <input className="form-input" type="text" inputMode="numeric" maxLength={8} placeholder="8-digit code"
+                    value={emailCode} onChange={e => setEmailCode(e.target.value.replace(/\D/g, "").slice(0, 8))} />
+                  <div className="form-help">
+                    Enter the 8-digit code sent to <code>{emailAddress}</code> (expires in 5 min).{" "}
+                    <a href="#" onClick={e => { e.preventDefault(); if (!emailSending) sendEmailCode(); }}>Resend code</a>
+                  </div>
+                </div>
+                <button className="btn" onClick={() => createSub("email")} disabled={emailCode.length !== 8 || busy} style={{width:"100%"}}>
+                  {busy ? <><span className="spinner" />Verifying…</> : "Verify & Subscribe"}
+                </button>
+              </>
+            )}
           </>
         )}
 
