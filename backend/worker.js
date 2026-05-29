@@ -693,7 +693,7 @@ async function checkSubscription(env, sub, gov = {}) {
           // Only alert if round has been active for at least 1 hour (or we can't tell)
           if (roundAgeMs == null || roundAgeMs >= oneHourMs) {
             const lastAlertedAt = Number(prevSnap.last_missed_alert_at || 0);
-            const cooldownMs = 35 * 60 * 1000; // > 30min cron interval to prevent same-round double-alert
+            const cooldownMs = 35 * 60 * 1000; // re-nudge spacing within a round (> cron interval)
             const lastAlertedRound = Number(prevSnap.last_missed_round || 0);
             const shouldAlert = lastAlertedRound !== onchainCurrentRound || (Date.now() - lastAlertedAt >= cooldownMs);
             if (shouldAlert) {
@@ -804,21 +804,28 @@ async function checkSubscription(env, sub, gov = {}) {
     // Default-on: treated as enabled unless explicitly turned off.
     if (sub.notify_governance !== false && Array.isArray(gov.proposals) && gov.proposals.length) {
       snap.gov_notified = { ...(prevSnap.gov_notified || {}) };
+      const curRound = gov.currentRound;
       for (const p of gov.proposals) {
         let voted = null;
         try { voted = await hasVoted(BigInt(p.id), orchAddr); }
         catch (e) { console.warn(`hasVoted failed for ${p.id}:`, e.message); }
-        if (voted === false && !snap.gov_notified[p.id]) {
-          const left = (gov.currentRound != null && p.voteEnd != null) ? p.voteEnd - gov.currentRound : null;
+        // gov_notified[pid] stores the round we last alerted for this proposal.
+        // Re-alert at most ONCE per round while the orchestrator hasn't voted
+        // (not every cron tick). If the round is unknown, fall back to alert-once.
+        const prevMark = snap.gov_notified[p.id];
+        const alreadyThisRound = prevMark != null && (curRound == null || prevMark === curRound);
+        if (voted === false && !alreadyThisRound) {
+          const left = (curRound != null && p.voteEnd != null) ? p.voteEnd - curRound : null;
           const pid = p.id;
+          const roundMark = curRound != null ? curRound : Date.now();
           events.push({
             title: "🗳 Treasury proposal needs a vote",
             message: `A Livepeer treasury proposal (\`#${String(p.id).slice(0, 8)}…\`) is open and your orchestrator \`${orchLabel}\` has **not voted** yet.` +
               (p.voteEnd != null ? ` Voting ends at round **${p.voteEnd}**${left != null && left >= 0 ? ` (~${left} round${left === 1 ? "" : "s"} left)` : ""}.` : "") +
               `\n\nAs a delegator you can vote to override your orchestrator: https://explorer.livepeer.org/voting`,
-            onSent: () => { snap.gov_notified[pid] = Date.now(); },
+            onSent: () => { snap.gov_notified[pid] = roundMark; },
           });
-        } else if (voted === true && snap.gov_notified[p.id]) {
+        } else if (voted === true && snap.gov_notified[p.id] != null) {
           const pid = p.id;
           events.push({
             title: "✅ Orchestrator Voted",
@@ -1095,7 +1102,7 @@ async function handleRequest(request, env) {
     if (sub.notify_monthly_digest) types.push("• Monthly earnings digest");
     await dispatch(env, sub,
       "✅ Subscription active",
-      `Now monitoring \`${wallet}\`\n\n${types.join("\n")}\n\nChecks run every 30 minutes.`
+      `Now monitoring \`${wallet}\`\n\n${types.join("\n")}\n\nChecks run every 10 minutes.`
     );
 
     return json({ subscription: sub });

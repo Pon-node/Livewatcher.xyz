@@ -1194,6 +1194,27 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
     if (discordPopupRef.current && !discordPopupRef.current.closed) discordPopupRef.current.close();
   }, []);
 
+  // Pre-fill the alert checkboxes from the existing subscription for this
+  // wallet + channel, so reopening the modal shows what's actually subscribed
+  // (rather than resetting to defaults and looking like it didn't save).
+  useEffect(() => {
+    const existing = subscriptions.find(s =>
+      (s.wallet || "").toLowerCase() === (wallet || "").toLowerCase() &&
+      ((s.channel || "telegram") === section)
+    );
+    if (existing) {
+      setNotify({
+        reward_cut: !!existing.notify_reward_cut,
+        fee_cut: !!existing.notify_fee_cut,
+        missed_reward: !!existing.notify_missed_reward,
+        claim_report: !!existing.notify_claim_report,
+        governance: existing.notify_governance !== false,
+        weekly_digest: !!existing.notify_weekly_digest,
+        monthly_digest: !!existing.notify_monthly_digest,
+      });
+    }
+  }, [section, subscriptions, wallet]);
+
   const startDiscordLink = async () => {
     try {
       setBusy(true);
