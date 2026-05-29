@@ -13,7 +13,7 @@
  *   GET    /telegram/poll/:code            - Poll for completion of Telegram linking
  *   POST   /telegram/webhook               - Telegram bot webhook
  *
- * Cron trigger: every 30 minutes — fetches latest state per subscription,
+ * Cron trigger: every 10 minutes — fetches latest state per subscription,
  * dispatches notifications via the appropriate channel.
  *
  * Bindings (set in wrangler.toml):
