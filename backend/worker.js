@@ -28,14 +28,27 @@
 
 const ALLOWED_CHANNELS = ["telegram", "email", "discord"];
 const MAX_SUBS_PER_CLIENT = 50;
+// All toggleable notification flags (used by the Telegram settings keyboard).
+const NOTIFY_FLAGS = [
+  "notify_reward_cut", "notify_fee_cut", "notify_missed_reward",
+  "notify_claim_report", "notify_governance", "notify_weekly_digest", "notify_monthly_digest",
+];
 
-// Livepeer Treasury contract (LivepeerGovernor on Arbitrum)
+// Livepeer Treasury contract (TimelockController that holds the funds) on Arbitrum
 const TREASURY_ADDR = "0xf82C1FF415F1fCf582554fDba790E27019c8E8C4";
 const LPT_TOKEN_ADDR = "0x289ba1701C2F088cf0faf8B3705246331cB8A839";
+// LivepeerGovernor (OpenZeppelin Governor) proxy on Arbitrum One — proposals + votes
+const GOVERNOR_ADDR = "0xcFE4E2879B786C3aa075813F0E364bb5acCb6aa0";
 // BondingManager proxy on Arbitrum One
 const BONDING_MANAGER_ADDR = "0x35Bcf3c30594191d53231e4ff333e8a770453e40";
 // RoundsManager proxy on Arbitrum One
 const ROUNDS_MANAGER_ADDR = "0xdd6f56DcC28D3F5f27084381fE8Df634985cc39f";
+
+// Governor ProposalCreated event topic0 (keccak of the canonical signature)
+const PROPOSAL_CREATED_TOPIC = "0x7d84a6263ae0d98d3329bd7b46bb4e8d6f98cd35a7adb45c274c8b7fd5ebd5e0";
+// How many recent L2 blocks to scan for new proposals each cron tick.
+// Arbitrum produces ~4 blocks/s; 12000 blocks ≈ 50 min > the 30-min cron interval.
+const GOV_SCAN_BLOCKS = 12000;
 const ARB_RPCS = [
   "https://arbitrum-one-rpc.publicnode.com",
   "https://arbitrum.drpc.org",
@@ -70,6 +83,15 @@ function todayKey() { return new Date().toISOString().slice(0, 10); }
 
 function isUuid(s) {
   return typeof s === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+}
+
+// Escape characters that Telegram's legacy Markdown parser treats as entity
+// markers. Any unbalanced _ * ` [ in user/external text (nicknames, orchestrator
+// display names) makes Telegram reject the whole message with HTTP 400, which
+// silently drops the notification. Apply to all dynamic text interpolated into
+// Markdown messages. Wallet addresses are hex so they never need escaping.
+function escapeMd(s) {
+  return String(s == null ? "" : s).replace(/([_*`\[])/g, "\\$1");
 }
 
 // Verify Telegram Login Widget auth payload per
@@ -156,6 +178,127 @@ async function getCurrentRoundStartBlock() {
   if (!hex) return null;
   try { return Number(BigInt(hex)); }
   catch { return null; }
+}
+
+// ─── Governance (LivepeerGovernor, on-chain) ─────────────────────────────────
+// eth_blockNumber -> latest L2 block number
+async function getBlockNumber() {
+  for (const rpcUrl of ARB_RPCS) {
+    try {
+      const res = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }),
+      });
+      if (!res.ok) continue;
+      const j = await res.json();
+      if (j.result) return Number(BigInt(j.result));
+    } catch (e) { console.warn(`blockNumber ${rpcUrl} failed:`, e.message); }
+  }
+  return null;
+}
+
+// eth_getLogs for one address+topic over a block range, with RPC fallback.
+async function ethGetLogs(address, topic0, fromBlock, toBlock) {
+  const params = [{
+    address,
+    topics: [topic0],
+    fromBlock: "0x" + Math.max(0, fromBlock).toString(16),
+    toBlock: "0x" + toBlock.toString(16),
+  }];
+  for (const rpcUrl of ARB_RPCS) {
+    try {
+      const res = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getLogs", params }),
+      });
+      if (!res.ok) continue;
+      const j = await res.json();
+      if (j.error || !Array.isArray(j.result)) continue;
+      return j.result;
+    } catch (e) { console.warn(`getLogs ${rpcUrl} failed:`, e.message); }
+  }
+  return null;
+}
+
+// Read the i-th 32-byte word (as a hex string with 0x) from ABI-encoded data.
+function abiWord(data, i) {
+  const hex = data.startsWith("0x") ? data.slice(2) : data;
+  return "0x" + hex.slice(i * 64, (i + 1) * 64);
+}
+
+// Pad a decimal proposalId (BigInt) into a 32-byte hex argument (no 0x).
+function pidArg(pidBig) {
+  return pidBig.toString(16).padStart(64, "0");
+}
+
+// Governor.state(uint256) -> enum (0 Pending,1 Active,2 Canceled,3 Defeated,
+// 4 Succeeded,5 Queued,6 Expired,7 Executed). selector 0x3e4f49e6
+async function getProposalState(pidBig) {
+  const hex = await ethCall(GOVERNOR_ADDR, "0x3e4f49e6" + pidArg(pidBig));
+  if (!hex) return null;
+  try { return Number(BigInt(hex)); }
+  catch { return null; }
+}
+
+// Governor.hasVoted(uint256,address) -> bool. selector 0x43859632
+async function hasVoted(pidBig, account) {
+  const arg = pidArg(pidBig) + account.toLowerCase().replace("0x", "").padStart(64, "0");
+  const hex = await ethCall(GOVERNOR_ADDR, "0x43859632" + arg);
+  if (!hex) return null;
+  try { return BigInt(hex) === 1n; }
+  catch { return null; }
+}
+
+// Governor.proposalDeadline(uint256) -> round number (Livepeer clock = rounds).
+// selector 0xc01f9e37
+async function getProposalDeadline(pidBig) {
+  const hex = await ethCall(GOVERNOR_ADDR, "0xc01f9e37" + pidArg(pidBig));
+  if (!hex) return null;
+  try { return Number(BigInt(hex)); }
+  catch { return null; }
+}
+
+// Scan recent blocks for ProposalCreated logs, merge into a persistent known-list
+// in KV (gov:known), then return the proposals that are currently Active.
+// Cached per-tick under gov:active so all subs in one cron reuse the result.
+async function getActiveProposals(env) {
+  // Per-tick cache (short TTL well under the 30-min cron interval)
+  const cached = await env.SUBS.get("gov:active", "json");
+  if (cached && Date.now() - cached.fetched_at < 10 * 60 * 1000) return cached.proposals;
+
+  const latest = await getBlockNumber();
+  if (latest == null) return [];
+
+  // Discover new proposals from recent logs and merge into the known list.
+  const known = (await env.SUBS.get("gov:known", "json")) || {};
+  const logs = await ethGetLogs(GOVERNOR_ADDR, PROPOSAL_CREATED_TOPIC, latest - GOV_SCAN_BLOCKS, latest);
+  if (logs) {
+    for (const log of logs) {
+      try {
+        // ProposalCreated params are all non-indexed; data holds them inline.
+        // word0 = proposalId, word6 = voteStart, word7 = voteEnd (rounds).
+        const pid = BigInt(abiWord(log.data, 0)).toString();
+        const voteEnd = Number(BigInt(abiWord(log.data, 7)));
+        if (!known[pid]) known[pid] = { id: pid, voteEnd, seen_at: Date.now() };
+      } catch (e) { console.warn("ProposalCreated decode failed:", e.message); }
+    }
+  }
+
+  // Check on-chain state for each known proposal; keep Active ones, prune the
+  // terminal ones (Canceled/Defeated/Expired/Executed) so the list stays small.
+  const active = [];
+  const pruned = {};
+  for (const pid of Object.keys(known)) {
+    const state = await getProposalState(BigInt(pid));
+    if (state == null) { pruned[pid] = known[pid]; continue; } // RPC hiccup — keep, retry later
+    if (state === 1) active.push(known[pid]);                  // Active
+    if (state === 0 || state === 1 || state === 4 || state === 5) pruned[pid] = known[pid]; // keep non-terminal
+  }
+  await env.SUBS.put("gov:known", JSON.stringify(pruned));
+  await env.SUBS.put("gov:active", JSON.stringify({ proposals: active, fetched_at: Date.now() }), { expirationTtl: 1800 });
+  return active;
 }
 
 // ─── Livepeer API ────────────────────────────────────────────────────────────
@@ -294,12 +437,16 @@ async function resolveNickname(env, sub) {
 }
 
 function formatSubLine(sub, idx, nickname) {
-  const label = nickname ? `*${nickname}* (\`${sub.wallet.slice(0, 8)}…${sub.wallet.slice(-4)}\`)` : `\`${sub.wallet.slice(0, 8)}…${sub.wallet.slice(-4)}\``;
+  const safeNick = nickname ? escapeMd(nickname) : null;
+  const label = safeNick ? `*${safeNick}* (\`${sub.wallet.slice(0, 8)}…${sub.wallet.slice(-4)}\`)` : `\`${sub.wallet.slice(0, 8)}…${sub.wallet.slice(-4)}\``;
   const flags = [];
   if (sub.notify_reward_cut) flags.push("RC");
   if (sub.notify_fee_cut) flags.push("FC");
   if (sub.notify_missed_reward) flags.push("MR");
   if (sub.notify_claim_report) flags.push("CR");
+  if (sub.notify_governance !== false) flags.push("GV");
+  if (sub.notify_weekly_digest) flags.push("WD");
+  if (sub.notify_monthly_digest) flags.push("MD");
   return `*${idx + 1}.* ${label}\n   _${flags.join(" · ") || "no alerts"}_`;
 }
 
@@ -311,6 +458,9 @@ function settingsKeyboard(sub) {
       [{ text: `${tick(sub.notify_fee_cut)} Fee cut changes`, callback_data: `toggle:${sub.id}:notify_fee_cut` }],
       [{ text: `${tick(sub.notify_missed_reward)} Missed rewards`, callback_data: `toggle:${sub.id}:notify_missed_reward` }],
       [{ text: `${tick(sub.notify_claim_report)} Claim reports`, callback_data: `toggle:${sub.id}:notify_claim_report` }],
+      [{ text: `${tick(sub.notify_governance !== false)} Treasury proposal votes`, callback_data: `toggle:${sub.id}:notify_governance` }],
+      [{ text: `${tick(sub.notify_weekly_digest)} Weekly earnings digest`, callback_data: `toggle:${sub.id}:notify_weekly_digest` }],
+      [{ text: `${tick(sub.notify_monthly_digest)} Monthly earnings digest`, callback_data: `toggle:${sub.id}:notify_monthly_digest` }],
       [{ text: "✕ Close", callback_data: `close` }],
     ],
   };
@@ -338,7 +488,7 @@ async function dispatch(env, sub, title, message) {
       nickname = await env.SUBS.get(`nick:${scope}:${sub.wallet}`);
     } catch {}
   }
-  const walletLabel = nickname ? `*${nickname}* (\`${sub.wallet}\`)` : `\`${sub.wallet}\``;
+  const walletLabel = nickname ? `*${escapeMd(nickname)}* (\`${sub.wallet}\`)` : `\`${sub.wallet}\``;
   const text = `*${title}*\n\n${message}\n\n_Wallet: ${walletLabel}_`;
   if (sub.channel === "telegram" && sub.telegram_chat_id) {
     return sendTelegram(env, sub.telegram_chat_id, text);
@@ -391,13 +541,18 @@ async function deleteSub(env, sub) {
 }
 
 // ─── Change detection ────────────────────────────────────────────────────────
-async function checkSubscription(env, sub) {
+// Returns { events, snap }. Each event may carry an onSent() callback that
+// advances the relevant snapshot state — called by the dispatcher ONLY after the
+// notification was delivered successfully, so a transient send failure is retried
+// next tick instead of being silently lost. `snap` is persisted by the caller
+// after the dispatch loop (or skipped entirely if null, e.g. on API error).
+async function checkSubscription(env, sub, gov = {}) {
   const events = [];
   const wallet = sub.wallet.toLowerCase();
 
   try {
     const del = await lp(env, `/delegators/${wallet}`);
-    if (!del.delegations || del.delegations.length === 0) return events;
+    if (!del.delegations || del.delegations.length === 0) return { events, snap: null };
     // Pick the delegation with the most recent as_of_block (the active one)
     const activeDelegation = [...del.delegations].sort((a, b) =>
       Number(b.as_of_block) - Number(a.as_of_block)
@@ -411,11 +566,23 @@ async function checkSubscription(env, sub) {
       lp(env, `/orchestrators/${orchAddr}/stake-history`).catch(() => ({ data: [] })),
     ]);
 
+    // Markdown-safe label for the orchestrator, reused everywhere below.
+    const orchLabel = escapeMd(orch.display_name || orchAddr.slice(0, 10));
+
     // cuts-history is sorted ascending (oldest first); newest cut is the last element
     const cuts = cutsRes.data || [];
     const latestCut = cuts.length > 0 ? cuts[cuts.length - 1] : null;
     const stakes = stakeRes.data || [];
     const prevSnap = (await env.SNAP.get(`snap:${sub.id}`, "json")) || {};
+
+    // Snapshot we will persist. Carry prev state forward; advance display fields
+    // unconditionally, and gating fields only via onSent (on successful send).
+    const snap = {
+      ...prevSnap,
+      orchestrator_address: orchAddr,
+      latest_round_seen: stakes[stakes.length - 1]?.round,
+      checked_at: Date.now(),
+    };
 
     // Build block→round lookup from stake history (sorted ascending by block)
     const sortedStakes = [...stakes].sort((a, b) => Number(a.block_number) - Number(b.block_number));
@@ -429,35 +596,59 @@ async function checkSubscription(env, sub) {
       return round;
     };
 
-    // Reward cut change — compare latest (last) cut event against snapshot
-    if (sub.notify_reward_cut && prevSnap.latest_cut_event_id && latestCut) {
-      if (latestCut.event_id !== prevSnap.latest_cut_event_id &&
-          latestCut.reward_cut_percent !== prevSnap.reward_cut_percent) {
-        const up = Number(latestCut.reward_cut_percent) > Number(prevSnap.reward_cut_percent);
-        const rcRound = blockToRound(latestCut.block_number);
-        events.push({
-          title: `${up ? "⚠️" : "✅"} Reward Cut ${up ? "Increased" : "Decreased"}`,
-          message: `Orchestrator \`${orch.display_name || orchAddr.slice(0, 10)}\` changed reward cut from **${Number(prevSnap.reward_cut_percent).toFixed(2)}%** → **${Number(latestCut.reward_cut_percent).toFixed(2)}%**` + (rcRound ? ` (round **${rcRound}**)` : ""),
-        });
+    // ── Cut changes ──
+    // Iterate every cut event newer than the stored baseline so multiple changes
+    // within one cron window are all reported (not just the latest).
+    const cutEvents = [];
+    if (latestCut) {
+      const haveBaseline = !!prevSnap.latest_cut_event_id;
+      let newCuts = [];
+      if (haveBaseline) {
+        const idx = cuts.findIndex(c => c.event_id === prevSnap.latest_cut_event_id);
+        newCuts = idx >= 0 ? cuts.slice(idx + 1) : [latestCut];
+      }
+      let prevReward = prevSnap.reward_cut_percent;
+      let prevFee = prevSnap.fee_cut_percent;
+      for (const c of newCuts) {
+        // Advance baseline (gating) state to THIS cut once its alert is delivered.
+        const onSent = () => {
+          snap.latest_cut_event_id = c.event_id;
+          snap.reward_cut_percent = c.reward_cut_percent;
+          snap.fee_cut_percent = c.fee_cut_percent;
+        };
+        if (sub.notify_reward_cut && prevReward != null && c.reward_cut_percent !== prevReward) {
+          const up = Number(c.reward_cut_percent) > Number(prevReward);
+          const rcRound = blockToRound(c.block_number);
+          cutEvents.push({
+            title: `${up ? "⚠️" : "✅"} Reward Cut ${up ? "Increased" : "Decreased"}`,
+            message: `Orchestrator \`${orchLabel}\` changed reward cut from **${Number(prevReward).toFixed(2)}%** → **${Number(c.reward_cut_percent).toFixed(2)}%**` + (rcRound ? ` (round **${rcRound}**)` : ""),
+            onSent,
+          });
+        }
+        if (sub.notify_fee_cut && prevFee != null && c.fee_cut_percent !== prevFee) {
+          const up = Number(c.fee_cut_percent) > Number(prevFee);
+          const fcRound = blockToRound(c.block_number);
+          cutEvents.push({
+            title: `${up ? "⚠️" : "✅"} Fee Cut ${up ? "Increased" : "Decreased"}`,
+            message: `Orchestrator \`${orchLabel}\` changed fee cut from **${Number(prevFee).toFixed(2)}%** → **${Number(c.fee_cut_percent).toFixed(2)}%**` + (fcRound ? ` (round **${fcRound}**)` : ""),
+            onSent,
+          });
+        }
+        prevReward = c.reward_cut_percent;
+        prevFee = c.fee_cut_percent;
+      }
+      if (cutEvents.length === 0) {
+        // First run, no change, or cut alerts disabled — safe to seed baseline now.
+        snap.latest_cut_event_id = latestCut.event_id;
+        snap.reward_cut_percent = latestCut.reward_cut_percent;
+        snap.fee_cut_percent = latestCut.fee_cut_percent;
+      } else {
+        events.push(...cutEvents);
       }
     }
 
-    // Fee cut change — compare latest (last) cut event against snapshot
-    if (sub.notify_fee_cut && prevSnap.latest_cut_event_id && latestCut) {
-      if (latestCut.event_id !== prevSnap.latest_cut_event_id &&
-          latestCut.fee_cut_percent !== prevSnap.fee_cut_percent) {
-        const up = Number(latestCut.fee_cut_percent) > Number(prevSnap.fee_cut_percent);
-        const fcRound = blockToRound(latestCut.block_number);
-        events.push({
-          title: `${up ? "⚠️" : "✅"} Fee Cut ${up ? "Increased" : "Decreased"}`,
-          message: `Orchestrator \`${orch.display_name || orchAddr.slice(0, 10)}\` changed fee cut from **${Number(prevSnap.fee_cut_percent).toFixed(2)}%** → **${Number(latestCut.fee_cut_percent).toFixed(2)}%**` + (fcRound ? ` (round **${fcRound}**)` : ""),
-        });
-      }
-    }
-
-    // Reward not claimed for the CURRENT round (on-chain check via Arbitrum RPC).
-    // Source of truth: BondingManager.getTranscoder(orch).lastRewardRound on-chain.
-    // If lastRewardRound >= currentRound, they've called reward() for this round.
+    // ── Reward not claimed for the CURRENT round (on-chain via Arbitrum RPC) ──
+    // Source of truth: BondingManager.getTranscoder(orch).lastRewardRound.
     if (sub.notify_missed_reward) {
       const [onchainCurrentRound, onchainLastRewardRound] = await Promise.all([
         getCurrentRound().catch(() => null),
@@ -490,28 +681,32 @@ async function checkSubscription(env, sub) {
               const ageHours = roundAgeMs != null ? Math.floor(roundAgeMs / oneHourMs) : null;
               events.push({
                 title: "🔴 Current Round Not Claimed",
-                message: `Orchestrator \`${orch.display_name || orchAddr.slice(0, 10)}\` has not called reward() for the current round **${onchainCurrentRound}**` +
+                message: `Orchestrator \`${orchLabel}\` has not called reward() for the current round **${onchainCurrentRound}**` +
                   (ageHours != null ? ` (active for ~${ageHours}h)` : "") + `.`,
+                onSent: () => {
+                  snap.last_missed_alert_at = Date.now();
+                  snap.last_missed_round = onchainCurrentRound;
+                },
               });
-              prevSnap.last_missed_alert_at = Date.now();
-              prevSnap.last_missed_round = onchainCurrentRound;
             }
           }
         } else if (prevSnap.last_missed_round && prevSnap.last_missed_round < onchainCurrentRound) {
           // Orchestrator caught up — send resolution message and clear state
           events.push({
             title: "✅ Reward Claimed",
-            message: `Orchestrator \`${orch.display_name || orchAddr.slice(0, 10)}\` claimed rewards for round **${onchainCurrentRound}**.`,
+            message: `Orchestrator \`${orchLabel}\` claimed rewards for round **${onchainCurrentRound}**.`,
+            onSent: () => {
+              delete snap.last_missed_round;
+              delete snap.last_missed_alert_at;
+            },
           });
-          delete prevSnap.last_missed_round;
-          delete prevSnap.last_missed_alert_at;
         }
       } else {
         console.warn(`[missed-reward] sub=${sub.id} on-chain RPC returned null, skipping`);
       }
     }
 
-    // Detailed claim report — new reward events since last check
+    // ── Detailed claim report — new reward events since last check ──
     if (sub.notify_claim_report) {
       try {
         const lastClaimEventId = prevSnap.last_claim_event_id;
@@ -571,35 +766,58 @@ async function checkSubscription(env, sub) {
             );
           }
 
+          const newestId = allRewards[0]?.id;
           events.push({
             title: `💰 Rewards Claimed (${newRewards.length} round${newRewards.length > 1 ? "s" : ""})`,
-            message: `Orchestrator \`${orch.display_name || orchAddr.slice(0, 10)}\`\n\n${lines.join("\n\n")}`,
+            message: `Orchestrator \`${orchLabel}\`\n\n${lines.join("\n\n")}`,
+            onSent: () => { snap.last_claim_event_id = newestId; },
           });
-
-          prevSnap.last_claim_event_id = allRewards[0]?.id;
         } else if (!lastClaimEventId && allRewards.length > 0) {
           // First time seeing this sub — just remember the most recent without spamming
-          prevSnap.last_claim_event_id = allRewards[0].id;
+          snap.last_claim_event_id = allRewards[0].id;
         }
       } catch (e) {
         console.warn(`Claim report fetch failed for sub ${sub.id}:`, e.message);
       }
     }
 
-    // Update snapshot — store the latest (last) cut event since cuts-history is ascending
-    await env.SNAP.put(`snap:${sub.id}`, JSON.stringify({
-      ...prevSnap,
-      orchestrator_address: orchAddr,
-      reward_cut_percent: latestCut?.reward_cut_percent,
-      fee_cut_percent: latestCut?.fee_cut_percent,
-      latest_cut_event_id: latestCut?.event_id,
-      latest_round_seen: stakes[stakes.length - 1]?.round,
-      checked_at: Date.now(),
-    }));
+    // ── Governance: orchestrator hasn't voted on an active treasury proposal ──
+    // Default-on: treated as enabled unless explicitly turned off.
+    if (sub.notify_governance !== false && Array.isArray(gov.proposals) && gov.proposals.length) {
+      snap.gov_notified = { ...(prevSnap.gov_notified || {}) };
+      for (const p of gov.proposals) {
+        let voted = null;
+        try { voted = await hasVoted(BigInt(p.id), orchAddr); }
+        catch (e) { console.warn(`hasVoted failed for ${p.id}:`, e.message); }
+        if (voted === false && !snap.gov_notified[p.id]) {
+          const left = (gov.currentRound != null && p.voteEnd != null) ? p.voteEnd - gov.currentRound : null;
+          const pid = p.id;
+          events.push({
+            title: "🗳 Treasury proposal needs a vote",
+            message: `A Livepeer treasury proposal (\`#${String(p.id).slice(0, 8)}…\`) is open and your orchestrator \`${orchLabel}\` has **not voted** yet.` +
+              (p.voteEnd != null ? ` Voting ends at round **${p.voteEnd}**${left != null && left >= 0 ? ` (~${left} round${left === 1 ? "" : "s"} left)` : ""}.` : "") +
+              `\n\nAs a delegator you can vote to override your orchestrator: https://explorer.livepeer.org/voting`,
+            onSent: () => { snap.gov_notified[pid] = Date.now(); },
+          });
+        } else if (voted === true && snap.gov_notified[p.id]) {
+          const pid = p.id;
+          events.push({
+            title: "✅ Orchestrator Voted",
+            message: `Your orchestrator \`${orchLabel}\` has now voted on treasury proposal \`#${String(p.id).slice(0, 8)}…\`.`,
+            onSent: () => { delete snap.gov_notified[pid]; },
+          });
+        }
+      }
+      // Drop tracking for proposals that are no longer active.
+      const activeIds = new Set(gov.proposals.map(p => String(p.id)));
+      for (const k of Object.keys(snap.gov_notified)) if (!activeIds.has(k)) delete snap.gov_notified[k];
+    }
+
+    return { events, snap };
   } catch (e) {
     console.error(`Check failed for sub ${sub.id}:`, e.message);
+    return { events: [], snap: null };
   }
-  return events;
 }
 
 async function snapshotTreasury(env) {
@@ -659,17 +877,135 @@ async function getDailyHistory(env, days = 90) {
     .slice(-days);
 }
 
+// Dispatch each event; advance gated snapshot state only on successful delivery,
+// then persist the snapshot once. Returns nothing.
+async function processSub(env, sub, gov) {
+  const { events, snap } = await checkSubscription(env, sub, gov);
+  for (const ev of events) {
+    const ok = await dispatch(env, sub, ev.title, ev.message);
+    if (ok && typeof ev.onSent === "function") ev.onSent();
+    else if (!ok) console.warn(`Dispatch failed (will retry) sub=${sub.id}: ${ev.title}`);
+  }
+  if (snap) await env.SNAP.put(`snap:${sub.id}`, JSON.stringify(snap));
+  return events;
+}
+
 async function runCron(env) {
   const subs = await listAllSubs(env);
   console.log(`Cron: ${subs.length} subscriptions to check`);
-  for (const sub of subs) {
-    const events = await checkSubscription(env, sub);
-    for (const ev of events) await dispatch(env, sub, ev.title, ev.message);
-  }
+
+  // Fetch active governance proposals + current round once per tick (shared by all subs).
+  const gov = { proposals: [], currentRound: null };
+  try { gov.proposals = await getActiveProposals(env); }
+  catch (e) { console.error("Governance fetch failed:", e.message); }
+  try { gov.currentRound = await getCurrentRound(); } catch {}
+
+  for (const sub of subs) await processSub(env, sub, gov);
+
   try { await snapshotTreasury(env); }
   catch (e) { console.error("Treasury snapshot failed:", e.message); }
   try { await snapshotDailyStats(env); }
   catch (e) { console.error("Daily stats snapshot failed:", e.message); }
+  try { await runDigests(env, subs); }
+  catch (e) { console.error("Digests failed:", e.message); }
+}
+
+// ─── Weekly / monthly earnings digests ───────────────────────────────────────
+// ISO-week key, e.g. "2026-W22". Used to fire a weekly digest once per week.
+function isoWeekKey(d = new Date()) {
+  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const day = date.getUTCDay() || 7;            // Mon=1..Sun=7
+  date.setUTCDate(date.getUTCDate() + 4 - day); // nearest Thursday
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((date - yearStart) / 86400000 + 1) / 7);
+  return `${date.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+function monthKey(d = new Date()) {
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+// Sum a delegator's earnings (LPT + USD) for an orchestrator over [from,to).
+// Uses the same proportional-share math as the per-event claim report.
+async function computeEarnings(env, sub, orchAddr, from, to) {
+  const [rewAgg, payAgg, orch, del] = await Promise.all([
+    lp(env, "/aggregations/events", { contract: "BondingManager", event_name: "Reward",
+      address: orchAddr, bucket: "day", metric: "sum_amount_usd", from, to }).catch(() => null),
+    lp(env, "/aggregations/events", { contract: "TicketBroker", event_name: "WinningTicketRedeemed",
+      address: orchAddr, bucket: "day", metric: "sum_amount_usd", from, to }).catch(() => null),
+    lp(env, `/orchestrators/${orchAddr}`).catch(() => null),
+    lp(env, `/delegators/${sub.wallet.toLowerCase()}`).catch(() => null),
+  ]);
+  const orchRewardsUsd = (rewAgg?.results || []).reduce((s, b) => s + Number(b.value || 0), 0);
+  const orchPayoutsUsd = (payAgg?.results || []).reduce((s, b) => s + Number(b.value || 0), 0);
+
+  const rewardCutFrac = Number(orch?.reward_cut_percent || 0) / 100;
+  const totalStake = Number(orch?.total_stake || 0);
+  const myDeleg = (del?.delegations || []).find(d => (d.delegate_address || "").toLowerCase() === orchAddr.toLowerCase());
+  const userStake = Number(myDeleg?.bonded_principal || 0);
+  const myShareFrac = totalStake > 0 ? userStake / totalStake : 0;
+
+  // Delegators get (1 - rewardCut) of inflation rewards; payouts (fees) follow the
+  // fee cut, approximated here with the same pool-share factor.
+  const myRewardsUsd = orchRewardsUsd * (1 - rewardCutFrac) * myShareFrac;
+  const myPayoutsUsd = orchPayoutsUsd * myShareFrac;
+  return {
+    orchRewardsUsd, orchPayoutsUsd,
+    myRewardsUsd, myPayoutsUsd,
+    myTotalUsd: myRewardsUsd + myPayoutsUsd,
+    sharePct: myShareFrac * 100,
+  };
+}
+
+async function sendDigest(env, sub, period, from, to) {
+  // Resolve the active orchestrator for this wallet.
+  let orchAddr = null;
+  try {
+    const del = await lp(env, `/delegators/${sub.wallet.toLowerCase()}`);
+    const active = (del.delegations || []).sort((a, b) => Number(b.as_of_block) - Number(a.as_of_block))[0];
+    orchAddr = active?.delegate_address;
+  } catch {}
+  if (!orchAddr) return false;
+
+  const e = await computeEarnings(env, sub, orchAddr, from, to);
+  const orchLabel = escapeMd(orchAddr.slice(0, 10));
+  const usd = (n) => `$${Number(n).toFixed(2)}`;
+  const title = period === "weekly" ? "📊 Weekly Earnings Digest" : "📊 Monthly Earnings Digest";
+  const message =
+    `Your earnings from \`${orchLabel}\` (${from} → ${to}):\n\n` +
+    `*Your reward share:* ${usd(e.myRewardsUsd)}\n` +
+    `*Your payout share:* ${usd(e.myPayoutsUsd)}\n` +
+    `*Total:* ${usd(e.myTotalUsd)}\n` +
+    `_Pool share: ${e.sharePct.toFixed(2)}%_`;
+  return dispatch(env, sub, title, message);
+}
+
+// Fire weekly/monthly digests at most once per period per sub, gated by a KV
+// marker. Runs every cron tick but only sends when a new period boundary passed.
+async function runDigests(env, subs) {
+  const now = new Date();
+  const curWeek = isoWeekKey(now);
+  const curMonth = monthKey(now);
+  // Window for "last week" = previous 7 days; "last month" = previous 30 days.
+  const today = todayKey();
+  const weekFrom = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10);
+  const monthFrom = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+
+  for (const sub of subs) {
+    if (sub.notify_weekly_digest) {
+      const key = `digest:w:${sub.id}:${curWeek}`;
+      if (!(await env.SUBS.get(key))) {
+        const ok = await sendDigest(env, sub, "weekly", weekFrom, today);
+        if (ok) await env.SUBS.put(key, "1", { expirationTtl: 40 * 86400 });
+      }
+    }
+    if (sub.notify_monthly_digest) {
+      const key = `digest:m:${sub.id}:${curMonth}`;
+      if (!(await env.SUBS.get(key))) {
+        const ok = await sendDigest(env, sub, "monthly", monthFrom, today);
+        if (ok) await env.SUBS.put(key, "1", { expirationTtl: 70 * 86400 });
+      }
+    }
+  }
 }
 
 // ─── HTTP routes ─────────────────────────────────────────────────────────────
@@ -686,7 +1022,7 @@ async function handleRequest(request, env) {
   // POST /subscriptions
   if (method === "POST" && path === "/subscriptions") {
     const body = await request.json().catch(() => ({}));
-    const { client_id, tg_user_id, wallet, channel, notify_reward_cut, notify_fee_cut, notify_missed_reward, notify_claim_report, telegram_chat_id, email_address, discord_webhook_url, discord_user_id, discord_username } = body;
+    const { client_id, tg_user_id, wallet, channel, notify_reward_cut, notify_fee_cut, notify_missed_reward, notify_claim_report, notify_governance, notify_weekly_digest, notify_monthly_digest, telegram_chat_id, email_address, discord_webhook_url, discord_user_id, discord_username } = body;
 
     if (!isUuid(client_id)) return err("Invalid client_id");
     if (!wallet || !/^0x[a-f0-9]{40}$/i.test(wallet)) return err("Invalid wallet address");
@@ -702,7 +1038,7 @@ async function handleRequest(request, env) {
         if (whu.protocol !== "https:" || !whu.hostname.endsWith("discord.com") || !whu.pathname.startsWith("/api/webhooks/")) return err("Invalid discord_webhook_url");
       } catch { return err("Invalid discord_webhook_url"); }
     }
-    if (!notify_reward_cut && !notify_fee_cut && !notify_missed_reward && !notify_claim_report) return err("Select at least one notification type");
+    if (!notify_reward_cut && !notify_fee_cut && !notify_missed_reward && !notify_claim_report && !notify_governance && !notify_weekly_digest && !notify_monthly_digest) return err("Select at least one notification type");
 
     const existing = await listSubsByClient(env, client_id);
     if (existing.length >= MAX_SUBS_PER_CLIENT) return err(`Subscription limit reached (${MAX_SUBS_PER_CLIENT}). Delete one first.`);
@@ -722,6 +1058,10 @@ async function handleRequest(request, env) {
       notify_fee_cut: !!notify_fee_cut,
       notify_missed_reward: !!notify_missed_reward,
       notify_claim_report: !!notify_claim_report,
+      // Governance defaults ON unless explicitly disabled; digests are opt-in.
+      notify_governance: notify_governance !== false,
+      notify_weekly_digest: !!notify_weekly_digest,
+      notify_monthly_digest: !!notify_monthly_digest,
       created_at: Date.now(),
     };
     await saveSub(env, sub);
@@ -731,6 +1071,9 @@ async function handleRequest(request, env) {
     if (sub.notify_fee_cut) types.push("• Fee cut changes");
     if (sub.notify_missed_reward) types.push("• Missed rewards");
     if (sub.notify_claim_report) types.push("• Detailed claim reports");
+    if (sub.notify_governance) types.push("• Treasury proposal votes");
+    if (sub.notify_weekly_digest) types.push("• Weekly earnings digest");
+    if (sub.notify_monthly_digest) types.push("• Monthly earnings digest");
     await dispatch(env, sub,
       "✅ Subscription active",
       `Now monitoring \`${wallet}\`\n\n${types.join("\n")}\n\nChecks run every 30 minutes.`
@@ -800,9 +1143,12 @@ async function handleRequest(request, env) {
     if (!env.DISCORD_CLIENT_ID) return err("Discord not configured (missing DISCORD_CLIENT_ID)");
     const state = crypto.randomUUID(); // full 128-bit UUID
     await env.CODES.put(`discord_state:${state}`, "", { expirationTtl: 600 });
+    // Derive the callback from THIS worker's origin so it always matches the
+    // deployed host (hardcoding broke Discord linking when the host changed).
+    const redirectUri = `${url.origin}/discord/callback`;
     const params = new URLSearchParams({
       client_id: env.DISCORD_CLIENT_ID,
-      redirect_uri: "https://livewatch-backend.paulius.workers.dev/discord/callback",
+      redirect_uri: redirectUri,
       response_type: "code",
       scope: "identify applications.commands",
       integration_type: "1",  // 1 = user install (allows DMs without shared server)
@@ -829,7 +1175,7 @@ async function handleRequest(request, env) {
         client_secret: env.DISCORD_CLIENT_SECRET,
         grant_type: "authorization_code",
         code,
-        redirect_uri: "https://livewatch-backend.paulius.workers.dev/discord/callback",
+        redirect_uri: `${url.origin}/discord/callback`,
       }),
     });
     if (!tokenRes.ok) return Response.redirect(`${redirectFrontend}?discord_error=token_exchange`, 302);
@@ -888,19 +1234,20 @@ async function handleRequest(request, env) {
           await answerCallback(env, cb.id, "Subscription not found");
         } else if (String(sub.tg_user_id || "") !== String(tgUserId) && String(sub.telegram_chat_id) !== String(chatId)) {
           await answerCallback(env, cb.id, "Not your subscription");
-        } else if (!["notify_reward_cut", "notify_fee_cut", "notify_missed_reward", "notify_claim_report"].includes(flag)) {
+        } else if (!NOTIFY_FLAGS.includes(flag)) {
           await answerCallback(env, cb.id, "Unknown setting");
         } else {
+          // Effective state: governance is on unless explicitly false.
+          const eff = (k) => k === "notify_governance" ? (sub.notify_governance !== false) : !!sub[k];
           // Prevent disabling the last enabled flag
-          const enabled = ["notify_reward_cut", "notify_fee_cut", "notify_missed_reward", "notify_claim_report"]
-            .filter(k => sub[k]).length;
-          if (sub[flag] && enabled <= 1) {
+          const enabled = NOTIFY_FLAGS.filter(eff).length;
+          if (eff(flag) && enabled <= 1) {
             await answerCallback(env, cb.id, "At least one alert must remain enabled");
           } else {
-            sub[flag] = !sub[flag];
+            sub[flag] = !eff(flag);
             await saveSub(env, sub);
             const nickname = await resolveNickname(env, sub);
-            const header = nickname ? `*Settings: ${nickname}*\n\`${sub.wallet}\`` : `*Settings*\n\`${sub.wallet}\``;
+            const header = nickname ? `*Settings: ${escapeMd(nickname)}*\n\`${sub.wallet}\`` : `*Settings*\n\`${sub.wallet}\``;
             await editTelegram(env, chatId, messageId, header, settingsKeyboard(sub));
             await answerCallback(env, cb.id, `${flag.replace("notify_", "")}: ${sub[flag] ? "ON" : "OFF"}`);
           }
@@ -958,7 +1305,7 @@ async function handleRequest(request, env) {
           }
           await sendTelegram(env, chatId,
             `*Your subscriptions (${subs.length})*\n\n${lines.join("\n\n")}\n\n` +
-            `_Legend: RC=reward cut · FC=fee cut · MR=missed reward · CR=claim reports_`
+            `_Legend: RC=reward cut · FC=fee cut · MR=missed reward · CR=claim reports · GV=treasury votes · WD=weekly digest · MD=monthly digest_`
           );
         }
         return json({ ok: true });
@@ -993,12 +1340,15 @@ async function handleRequest(request, env) {
           notify_fee_cut: true,
           notify_missed_reward: true,
           notify_claim_report: false,
+          notify_governance: true,
+          notify_weekly_digest: false,
+          notify_monthly_digest: false,
           created_at: Date.now(),
         };
         await saveSub(env, sub);
         await sendTelegram(env, chatId,
           `✅ *Subscription added!*\n\nMonitoring \`${wallet}\`\n\n` +
-          `Defaults: reward cut, fee cut, missed reward alerts ON · claim reports OFF\n\n` +
+          `Defaults: reward cut, fee cut, missed reward, treasury-vote alerts ON · claim reports & digests OFF\n\n` +
           `Use \`/settings ${existing.length + 1}\` to change.`
         );
         return json({ ok: true });
@@ -1041,7 +1391,7 @@ async function handleRequest(request, env) {
           await sendTelegram(env, chatId, `Nickname cleared for \`${sub.wallet}\`.`);
         } else {
           await env.SUBS.put(key, newNick.slice(0, 80));
-          await sendTelegram(env, chatId, `Nickname for \`${sub.wallet}\` set to *${newNick}*.`);
+          await sendTelegram(env, chatId, `Nickname for \`${sub.wallet}\` set to *${escapeMd(newNick)}*.`);
         }
         return json({ ok: true });
       }
@@ -1059,7 +1409,7 @@ async function handleRequest(request, env) {
           return json({ ok: true });
         }
         const nickname = await resolveNickname(env, sub);
-        const header = nickname ? `*Settings: ${nickname}*\n\`${sub.wallet}\`` : `*Settings*\n\`${sub.wallet}\``;
+        const header = nickname ? `*Settings: ${escapeMd(nickname)}*\n\`${sub.wallet}\`` : `*Settings*\n\`${sub.wallet}\``;
         await sendTelegram(env, chatId, header, { reply_markup: settingsKeyboard(sub) });
         return json({ ok: true });
       }
@@ -1181,14 +1531,19 @@ async function handleRequest(request, env) {
     } else {
       return err("Provide sub_id or wallet param");
     }
+    const gov = { proposals: [], currentRound: null };
+    try { gov.proposals = await getActiveProposals(env); } catch (e) { console.warn("gov fetch failed:", e.message); }
+    try { gov.currentRound = await getCurrentRound(); } catch {}
     const results = [];
     for (const sub of subs) {
-      const events = await checkSubscription(env, sub);
+      const { events, snap } = await checkSubscription(env, sub, gov);
       const dispatched = [];
       for (const ev of events) {
         const ok = await dispatch(env, sub, ev.title, ev.message);
+        if (ok && typeof ev.onSent === "function") ev.onSent();
         dispatched.push({ title: ev.title, sent: ok });
       }
+      if (snap) await env.SNAP.put(`snap:${sub.id}`, JSON.stringify(snap));
       results.push({ sub_id: sub.id, wallet: sub.wallet, events_found: events.length, dispatched });
     }
     return json({ ok: true, results });

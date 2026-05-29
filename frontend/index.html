@@ -487,6 +487,7 @@ function App() {
   const [lastPoll, setLastPoll] = useState(null);
   const [progress, setProgress] = useState("");
   const [econView, setEconView] = useState("orchestrator");
+  const [windowEarnings, setWindowEarnings] = useState(null);
   const [showNotifs, setShowNotifs] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [subscriptions, setSubscriptions] = useState([]);
@@ -775,6 +776,35 @@ function App() {
   };
 
   const myDelegation = delegator?.activeDelegation || delegator?.delegations?.[0];
+
+  // Per-delegator estimated earnings over 7d & 30d windows
+  useEffect(() => {
+    const orchAddr = orchestrator?.address;
+    const myStake = myDelegation ? Number(myDelegation.bonded_principal) : 0;
+    const totalStake = orchestrator ? Number(orchestrator.total_stake) : 0;
+    if (!orchAddr || !myStake || !totalStake) { setWindowEarnings(null); return; }
+    let cancelled = false;
+    const myShare = myStake / totalStake;
+    const rewardCut = Number(orchestrator.reward_cut_percent) / 100;
+    const today = new Date().toISOString().slice(0, 10);
+    const sumResults = (res) => (res && res.results ? res.results.reduce((a, r) => a + (Number(r.value) || 0), 0) : 0);
+    const loadWindow = async (days) => {
+      const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+      const [rewardRes, payoutRes] = await Promise.all([
+        api("/aggregations/events", { contract: "BondingManager", event_name: "Reward", address: orchAddr, bucket: "day", metric: "sum_amount_usd", from, to: today }).catch(() => null),
+        api("/aggregations/events", { contract: "TicketBroker", event_name: "WinningTicketRedeemed", address: orchAddr, bucket: "day", metric: "sum_amount_usd", from, to: today }).catch(() => null),
+      ]);
+      const rewards = sumResults(rewardRes) * (1 - rewardCut) * myShare;
+      const payouts = sumResults(payoutRes) * myShare;
+      return { rewards, payouts, total: rewards + payouts };
+    };
+    (async () => {
+      const [w7, w30] = await Promise.all([loadWindow(7), loadWindow(30)]);
+      if (!cancelled) setWindowEarnings({ d7: w7, d30: w30 });
+    })();
+    return () => { cancelled = true; };
+  }, [orchestrator, myDelegation]);
+
   const computeDelegatorEcon = () => {
     if (!netEcon || !orchestrator || !myDelegation) return null;
     const myStake = Number(myDelegation.bonded_principal);
@@ -973,6 +1003,20 @@ function App() {
                   Estimated as (your bonded / total stake) × gross × (1 − cut). Excludes pending/unclaimed amounts.
                 </div>
               )}
+              {econView === "delegator" && (
+                <div className="card" style={{marginTop:12}}>
+                  <div className="card-title">Your Earnings</div>
+                  <div className="stats-grid">
+                    {[{label:"Last 7 Days",w:windowEarnings && windowEarnings.d7},{label:"Last 30 Days",w:windowEarnings && windowEarnings.d30}].map(({label,w}) => (
+                      <div className="stat" key={label}>
+                        <div className="stat-label">{label}</div>
+                        <div className="stat-value">{w ? usd(w.total) : "—"}</div>
+                        <div className="stat-sub">{w ? `${usd(w.rewards)} rewards · ${usd(w.payouts)} payouts` : "—"}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1107,7 +1151,7 @@ function SettingsModal({ onClose, onSave }) {
 function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, setError, setSuccess }) {
   const [section, setSection] = useState("telegram"); // 'telegram' | 'email' | 'discord' | 'browser'
   const [channel, setChannel] = useState("telegram");
-  const [notify, setNotify] = useState({ reward_cut: true, fee_cut: true, missed_reward: true, claim_report: false });
+  const [notify, setNotify] = useState({ reward_cut: true, fee_cut: true, missed_reward: true, claim_report: false, governance: true, weekly_digest: false, monthly_digest: false });
   const [tgCode, setTgCode] = useState(null);
   const [tgBotName, setTgBotName] = useState(null);
   const [tgChatId, setTgChatId] = useState(S.getLinked()?.chat_id || null);
@@ -1178,7 +1222,7 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
   };
 
   const createSub = async (ch) => {
-    if (!notify.reward_cut && !notify.fee_cut && !notify.missed_reward && !notify.claim_report) {
+    if (!notify.reward_cut && !notify.fee_cut && !notify.missed_reward && !notify.claim_report && !notify.governance && !notify.weekly_digest && !notify.monthly_digest) {
       setError("Select at least one notification type."); return;
     }
     if (ch === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddress)) {
@@ -1197,6 +1241,9 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
         notify_fee_cut: notify.fee_cut,
         notify_missed_reward: notify.missed_reward,
         notify_claim_report: notify.claim_report,
+        notify_governance: notify.governance,
+        notify_weekly_digest: notify.weekly_digest,
+        notify_monthly_digest: notify.monthly_digest,
         telegram_chat_id: ch === "telegram" ? tgChatId : null,
         email_address: ch === "email" ? emailAddress.trim() : null,
         discord_user_id: ch === "discord" ? discordUser?.discord_user_id : null,
@@ -1261,6 +1308,18 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
         <label className="checkbox-item">
           <input type="checkbox" checked={notify.claim_report} onChange={e => setNotify(n => ({ ...n, claim_report: e.target.checked }))} />
           <div className="ck-text"><div className="ck-title">Round claim reports</div><div className="ck-desc">Per-round breakdown: total minted LPT, orch/delegator shares, your share, USD value.</div></div>
+        </label>
+        <label className="checkbox-item">
+          <input type="checkbox" checked={notify.governance} onChange={e => setNotify(n => ({ ...n, governance: e.target.checked }))} />
+          <div className="ck-text"><div className="ck-title">Treasury proposal votes</div><div className="ck-desc">When a Livepeer treasury proposal is open and your orchestrator hasn't voted yet — so you can vote to override.</div></div>
+        </label>
+        <label className="checkbox-item">
+          <input type="checkbox" checked={notify.weekly_digest} onChange={e => setNotify(n => ({ ...n, weekly_digest: e.target.checked }))} />
+          <div className="ck-text"><div className="ck-title">Weekly earnings digest</div><div className="ck-desc">A weekly summary of your reward and payout earnings in USD.</div></div>
+        </label>
+        <label className="checkbox-item">
+          <input type="checkbox" checked={notify.monthly_digest} onChange={e => setNotify(n => ({ ...n, monthly_digest: e.target.checked }))} />
+          <div className="ck-text"><div className="ck-title">Monthly earnings digest</div><div className="ck-desc">A monthly summary of your reward and payout earnings in USD.</div></div>
         </label>
       </div>
     </div>
@@ -1786,6 +1845,7 @@ function MetricChartModal({ metric, lptPriceUsd, onClose }) {
   const min = values.length ? Math.min(...values) : 0;
   const max = values.length ? Math.max(...values) : 0;
   const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+  const total = values.reduce((a, b) => a + b, 0);
   const first = values[0] || 0;
   const last = values[values.length - 1] || 0;
   const change = last - first;
@@ -1838,6 +1898,7 @@ function MetricChartModal({ metric, lptPriceUsd, onClose }) {
               <div><div className="chart-stat-label">Min</div><div className="chart-stat-value">{formatVal(min)}</div></div>
               <div><div className="chart-stat-label">Max</div><div className="chart-stat-value">{formatVal(max)}</div></div>
               <div><div className="chart-stat-label">Avg</div><div className="chart-stat-value">{formatVal(avg)}</div></div>
+              {isUsd && <div><div className="chart-stat-label">Total ({range})</div><div className="chart-stat-value">{formatVal(total)}</div></div>}
             </div>
           </>
         )}
