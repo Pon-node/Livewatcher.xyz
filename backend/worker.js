@@ -1048,7 +1048,7 @@ async function handleRequest(request, env) {
   // POST /subscriptions
   if (method === "POST" && path === "/subscriptions") {
     const body = await request.json().catch(() => ({}));
-    const { client_id, tg_user_id, wallet, channel, notify_reward_cut, notify_fee_cut, notify_missed_reward, notify_claim_report, notify_governance, notify_weekly_digest, notify_monthly_digest, telegram_chat_id, email_address, discord_webhook_url, discord_user_id, discord_username } = body;
+    const { client_id, tg_user_id, wallet, channel, notify_reward_cut, notify_fee_cut, notify_missed_reward, notify_claim_report, notify_governance, notify_weekly_digest, notify_monthly_digest, telegram_chat_id, email_address, email_code, discord_webhook_url, discord_user_id, discord_username } = body;
 
     if (!isUuid(client_id)) return err("Invalid client_id");
     if (!wallet || !/^0x[a-f0-9]{40}$/i.test(wallet)) return err("Invalid wallet address");
@@ -1065,6 +1065,25 @@ async function handleRequest(request, env) {
       } catch { return err("Invalid discord_webhook_url"); }
     }
     if (!notify_reward_cut && !notify_fee_cut && !notify_missed_reward && !notify_claim_report && !notify_governance && !notify_weekly_digest && !notify_monthly_digest) return err("Select at least one notification type");
+
+    // Email addresses must be verified: the caller proves ownership by entering
+    // the code we emailed via POST /email/verify/start. Other channels prove
+    // ownership through their own linking flow (Telegram code, Discord OAuth).
+    if (channel === "email") {
+      if (!email_code || !/^\d{8}$/.test(String(email_code))) return err("Verification code required");
+      const vkey = `everify:${client_id}:${email_address.toLowerCase()}`;
+      const rec = await env.CODES.get(vkey, "json");
+      const ageMs = rec ? Date.now() - (rec.created_at || 0) : Infinity;
+      if (!rec || ageMs > 300_000) { if (rec) await env.CODES.delete(vkey); return err("Verification code expired. Request a new one.", 410); }
+      if (String(rec.code) !== String(email_code)) {
+        const attempts = (rec.attempts || 0) + 1;
+        if (attempts >= 3) { await env.CODES.delete(vkey); return err("Too many incorrect attempts. Request a new code.", 429); }
+        const ttl = Math.max(60, 300 - Math.floor(ageMs / 1000));
+        await env.CODES.put(vkey, JSON.stringify({ ...rec, attempts }), { expirationTtl: ttl });
+        return err(`Incorrect code. ${3 - attempts} attempt${3 - attempts !== 1 ? "s" : ""} left.`);
+      }
+      await env.CODES.delete(vkey); // verified — consume the code
+    }
 
     const existing = await listSubsByClient(env, client_id);
     if (existing.length >= MAX_SUBS_PER_CLIENT) return err(`Subscription limit reached (${MAX_SUBS_PER_CLIENT}). Delete one first.`);
@@ -1092,18 +1111,23 @@ async function handleRequest(request, env) {
     };
     await saveSub(env, sub);
 
-    const types = [];
-    if (sub.notify_reward_cut) types.push("• Reward cut changes");
-    if (sub.notify_fee_cut) types.push("• Fee cut changes");
-    if (sub.notify_missed_reward) types.push("• Missed rewards");
-    if (sub.notify_claim_report) types.push("• Detailed claim reports");
-    if (sub.notify_governance) types.push("• Treasury proposal votes");
-    if (sub.notify_weekly_digest) types.push("• Weekly earnings digest");
-    if (sub.notify_monthly_digest) types.push("• Monthly earnings digest");
-    await dispatch(env, sub,
-      "✅ Subscription active",
-      `Now monitoring \`${wallet}\`\n\n${types.join("\n")}\n\nChecks run every 10 minutes.`
-    );
+    // Email subscribers already received the verification email; the address was
+    // confirmed by code, so we skip a redundant second email. Telegram/Discord
+    // get an in-channel "active" confirmation.
+    if (channel !== "email") {
+      const types = [];
+      if (sub.notify_reward_cut) types.push("• Reward cut changes");
+      if (sub.notify_fee_cut) types.push("• Fee cut changes");
+      if (sub.notify_missed_reward) types.push("• Missed rewards");
+      if (sub.notify_claim_report) types.push("• Detailed claim reports");
+      if (sub.notify_governance) types.push("• Treasury proposal votes");
+      if (sub.notify_weekly_digest) types.push("• Weekly earnings digest");
+      if (sub.notify_monthly_digest) types.push("• Monthly earnings digest");
+      await dispatch(env, sub,
+        "✅ Subscription active",
+        `Now monitoring \`${wallet}\`\n\n${types.join("\n")}\n\nChecks run every 10 minutes.`
+      );
+    }
 
     return json({ subscription: sub });
   }
@@ -1141,6 +1165,23 @@ async function handleRequest(request, env) {
     if (!ownedByClient && !ownedByTgUser) return err("Forbidden", 403);
     await deleteSub(env, sub);
     return json({ ok: true });
+  }
+
+  // POST /email/verify/start — email an 8-digit code the caller must echo back
+  // when creating an email subscription, proving they control the address.
+  if (method === "POST" && path === "/email/verify/start") {
+    const body = await request.json().catch(() => ({}));
+    const { client_id, email } = body;
+    if (!isUuid(client_id)) return err("Invalid client_id");
+    if (!email || !/^[^\s@]{1,64}@[^\s@]{1,255}$/.test(email)) return err("Invalid email");
+    const code = newCode();
+    const vkey = `everify:${client_id}:${email.toLowerCase()}`;
+    await env.CODES.put(vkey, JSON.stringify({ code, attempts: 0, created_at: Date.now() }), { expirationTtl: 300 });
+    const sent = await sendEmail(env, email,
+      "Your LiveWatch verification code",
+      `Your LiveWatch email verification code is:\n\n${code}\n\nEnter it on livewatcher.xyz to confirm this address. The code expires in 5 minutes.\n\nIf you didn't request this, ignore this email.`);
+    if (!sent) return err("Could not send verification email. Try again.", 502);
+    return json({ sent: true, expires_in: 300 });
   }
 
   // POST /telegram/link
