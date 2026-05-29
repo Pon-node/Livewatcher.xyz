@@ -1461,7 +1461,7 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
                   <span style={{cursor:"pointer",color:"var(--muted)",fontSize:11}} onClick={() => { setDiscordUser(null); S.setDiscordUser(null); }}>Unlink</span>
                 </div>
               )}
-              <div className="form-help" style={{marginTop:8}}>LiveWatch will send you direct messages on Discord when alerts fire. Requires DISCORD_BOT_TOKEN + DISCORD_CLIENT_ID + DISCORD_CLIENT_SECRET set on the backend.</div>
+              <div className="form-help" style={{marginTop:8}}>LiveWatch will send you direct messages on Discord when alerts fire. Link your account above to get started.</div>
             </div>
             {notifyCheckboxes}
             <button className="btn" onClick={() => createSub("discord")} disabled={!discordUser || busy} style={{width:"100%"}}>
