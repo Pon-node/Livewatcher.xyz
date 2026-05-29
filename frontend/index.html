@@ -1284,11 +1284,61 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
     finally { setBusy(false); }
   };
 
-  const deleteSub = async (id) => {
+  // Multi-select removal: pick subscriptions via checkboxes, remove in one click.
+  const [selectedIds, setSelectedIds] = useState({});
+  const toggleSel = (id) => setSelectedIds(m => ({ ...m, [id]: !m[id] }));
+
+  const removeSelected = async (channelSubs) => {
+    const ids = channelSubs.filter(s => selectedIds[s.id]).map(s => s.id);
+    if (!ids.length) return;
+    if (!confirm(`Remove ${ids.length} subscription${ids.length !== 1 ? "s" : ""}? This can't be undone.`)) return;
     try {
-      await backend(`/subscriptions/${id}`, { method: "DELETE" });
+      await Promise.all(ids.map(id => backend(`/subscriptions/${id}`, { method: "DELETE" })));
+      setSelectedIds(m => { const n = { ...m }; ids.forEach(id => delete n[id]); return n; });
       onChange();
     } catch (e) { setError(e.message); }
+  };
+
+  // Renders an active-subscriptions list for one channel with per-row checkboxes,
+  // a select-all toggle, and a bulk "Remove selected" button (confirms first).
+  const renderSubList = (channelSubs, icon, label, metaFn) => {
+    if (!channelSubs.length) return null;
+    const selCount = channelSubs.filter(s => selectedIds[s.id]).length;
+    const allChecked = selCount === channelSubs.length;
+    const toggleAll = () => setSelectedIds(m => {
+      const n = { ...m };
+      channelSubs.forEach(s => { if (allChecked) delete n[s.id]; else n[s.id] = true; });
+      return n;
+    });
+    return (
+      <div className="form-group">
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <label className="form-label" style={{margin:0}}>{label}</label>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"var(--muted)",cursor:"pointer"}}>
+            <input type="checkbox" checked={allChecked} onChange={toggleAll} /> Select all
+          </label>
+        </div>
+        {channelSubs.map(s => (
+          <label className="sub-item" key={s.id} style={{cursor:"pointer"}}>
+            <input type="checkbox" checked={!!selectedIds[s.id]} onChange={() => toggleSel(s.id)} style={{marginRight:4}} />
+            <span className="sub-channel-icon">{icon}</span>
+            <div className="sub-info">
+              <div className="sub-title">
+                {shortAddr(s.wallet)}
+                {s.notify_reward_cut ? " · Reward cut" : ""}
+                {s.notify_fee_cut ? " · Fee cut" : ""}
+                {s.notify_missed_reward ? " · Missed reward" : ""}
+                {s.notify_claim_report ? " · Claim reports" : ""}
+              </div>
+              <div className="sub-meta">{metaFn(s)}</div>
+            </div>
+          </label>
+        ))}
+        <button className="btn-ghost danger" onClick={() => removeSelected(channelSubs)} disabled={!selCount} style={{marginTop:8}}>
+          ✕ Remove selected{selCount ? ` (${selCount})` : ""}
+        </button>
+      </div>
+    );
   };
 
   const updateBrowserPrefs = (changes) => {
@@ -1362,28 +1412,11 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
 
         {section === "telegram" && (
           <>
-            {subscriptions.length > 0 && (
-              <div className="form-group">
-                <label className="form-label">Your Active Telegram Subscriptions</label>
-                {subscriptions.filter(s => s.channel === "telegram" || !s.channel).map(s => (
-                  <div className="sub-item" key={s.id}>
-                    <span className="sub-channel-icon">📱</span>
-                    <div className="sub-info">
-                      <div className="sub-title">
-                        {shortAddr(s.wallet)}
-                        {s.notify_reward_cut ? " · Reward cut" : ""}
-                        {s.notify_fee_cut ? " · Fee cut" : ""}
-                        {s.notify_missed_reward ? " · Missed reward" : ""}
-                        {s.notify_claim_report ? " · Claim reports" : ""}
-                      </div>
-                      <div className="sub-meta">
-                    {s.channel === "telegram" ? `Telegram chat ${s.telegram_chat_id}` : s.channel === "email" ? `Email: ${s.email_address}` : s.channel === "discord" ? "Discord webhook" : s.channel}
-                  </div>
-                    </div>
-                    <button className="btn-ghost danger" onClick={() => deleteSub(s.id)}>✕ Remove</button>
-                  </div>
-                ))}
-              </div>
+            {renderSubList(
+              subscriptions.filter(s => s.channel === "telegram" || !s.channel),
+              "📱",
+              "Your Active Telegram Subscriptions",
+              s => s.channel === "telegram" ? `Telegram chat ${s.telegram_chat_id}` : s.channel === "email" ? `Email: ${s.email_address}` : s.channel === "discord" ? "Discord webhook" : s.channel
             )}
 
             <div className="form-group">
@@ -1419,20 +1452,11 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
 
         {section === "email" && (
           <>
-            {subscriptions.filter(s => s.channel === "email").length > 0 && (
-              <div className="form-group">
-                <label className="form-label">Active Email Subscriptions</label>
-                {subscriptions.filter(s => s.channel === "email").map(s => (
-                  <div className="sub-item" key={s.id}>
-                    <span className="sub-channel-icon">📧</span>
-                    <div className="sub-info">
-                      <div className="sub-title">{shortAddr(s.wallet)}{s.notify_reward_cut ? " · Reward cut" : ""}{s.notify_fee_cut ? " · Fee cut" : ""}{s.notify_missed_reward ? " · Missed reward" : ""}{s.notify_claim_report ? " · Claim reports" : ""}</div>
-                      <div className="sub-meta">{s.email_address}</div>
-                    </div>
-                    <button className="btn-ghost danger" onClick={() => deleteSub(s.id)}>✕ Remove</button>
-                  </div>
-                ))}
-              </div>
+            {renderSubList(
+              subscriptions.filter(s => s.channel === "email"),
+              "📧",
+              "Active Email Subscriptions",
+              s => s.email_address
             )}
             <div className="form-group">
               <label className="form-label">Email Address</label>
@@ -1448,20 +1472,11 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
 
         {section === "discord" && (
           <>
-            {subscriptions.filter(s => s.channel === "discord").length > 0 && (
-              <div className="form-group">
-                <label className="form-label">Active Discord Subscriptions</label>
-                {subscriptions.filter(s => s.channel === "discord").map(s => (
-                  <div className="sub-item" key={s.id}>
-                    <span className="sub-channel-icon">🎮</span>
-                    <div className="sub-info">
-                      <div className="sub-title">{shortAddr(s.wallet)}{s.notify_reward_cut ? " · Reward cut" : ""}{s.notify_fee_cut ? " · Fee cut" : ""}{s.notify_missed_reward ? " · Missed reward" : ""}{s.notify_claim_report ? " · Claim reports" : ""}</div>
-                      <div className="sub-meta">{s.discord_username ? `@${s.discord_username}` : "Discord DM"}</div>
-                    </div>
-                    <button className="btn-ghost danger" onClick={() => deleteSub(s.id)}>✕ Remove</button>
-                  </div>
-                ))}
-              </div>
+            {renderSubList(
+              subscriptions.filter(s => s.channel === "discord"),
+              "🎮",
+              "Active Discord Subscriptions",
+              s => s.discord_username ? `@${s.discord_username}` : "Discord DM"
             )}
             <div className="form-group">
               <label className="form-label">Link Discord Account</label>
