@@ -1188,13 +1188,20 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
   const startTelegramLink = async () => {
     try {
       setBusy(true);
+      // Cancel any in-flight poll from a previous click so we don't leave
+      // orphaned intervals running against stale codes.
+      if (pollRef.current) clearInterval(pollRef.current);
       const res = await backend("/telegram/link", { method: "POST", body: "{}" });
       setTgCode(res.code); setTgBotName(res.bot_username); setPolling(true);
-      pollRef.current = setInterval(async () => {
+      // Capture this poll's own interval id in a local. The expiry timeout and
+      // the linked-branch below clear THIS id only — never whatever pollRef
+      // happens to point at later — so overlapping clicks can't kill each other.
+      const id = setInterval(async () => {
         try {
           const r = await backend(`/telegram/poll/${res.code}`);
           if (r.linked) {
-            clearInterval(pollRef.current); setPolling(false);
+            clearInterval(id); if (pollRef.current === id) pollRef.current = null;
+            setPolling(false);
             setTgChatId(r.telegram_chat_id); setTgUsername(r.telegram_username);
             S.setLinked({ chat_id: r.telegram_chat_id, username: r.telegram_username });
             setSuccess("Telegram linked! Now select notification types and subscribe.");
@@ -1202,7 +1209,8 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
           }
         } catch {}
       }, 2000);
-      setTimeout(() => { if (pollRef.current) { clearInterval(pollRef.current); setPolling(false); } }, 600_000);
+      pollRef.current = id;
+      setTimeout(() => { clearInterval(id); if (pollRef.current === id) { pollRef.current = null; setPolling(false); } }, 600_000);
     } catch (e) { setError(e.message); }
     finally { setBusy(false); }
   };
@@ -1327,7 +1335,10 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
         : ch === "email"
         ? `Email verified — subscription active for ${emailAddress}.`
         : "Subscription created! Test message sent to your Discord channel.";
-      if (ch === "email") { setEmailCodeSent(false); setEmailCode(""); setEmailAddress(""); }
+      // Reset only the verification step, keep the address shown. Clearing it
+      // greyed the button back to "Send verification code", which read as a
+      // failure even though the subscription was created (now listed above).
+      if (ch === "email") { setEmailCodeSent(false); setEmailCode(""); }
       setSuccess(confirmMsg);
       setTimeout(() => setSuccess(null), 5000);
       onChange();
