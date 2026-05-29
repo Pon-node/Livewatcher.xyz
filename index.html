@@ -351,6 +351,26 @@ async function getLptBalance(address) {
   return Number(BigInt(hex)) / 1e18;
 }
 
+// BondingManager.pendingStake(address,uint256) -> stake incl. rewards accrued through endRound (selector 0x9d0b2c7a)
+async function getPendingStake(address, endRound) {
+  const data = "0x9d0b2c7a"
+    + address.toLowerCase().replace("0x", "").padStart(64, "0")
+    + BigInt(endRound).toString(16).padStart(64, "0");
+  const hex = await ethCall(BONDING_MANAGER_ADDR, data);
+  if (!hex) return null;
+  try { return Number(BigInt(hex)) / 1e18; } catch { return null; }
+}
+
+// BondingManager.pendingFees(address,uint256) -> fees accrued through endRound (selector 0xf595f1cc)
+async function getPendingFees(address, endRound) {
+  const data = "0xf595f1cc"
+    + address.toLowerCase().replace("0x", "").padStart(64, "0")
+    + BigInt(endRound).toString(16).padStart(64, "0");
+  const hex = await ethCall(BONDING_MANAGER_ADDR, data);
+  if (!hex) return null;
+  try { return Number(BigInt(hex)) / 1e18; } catch { return null; }
+}
+
 // BondingManager.getTranscoder(address) -> first field is lastRewardRound (selector 0x1944cb05)
 async function getLastRewardRound(orchestrator) {
   const data = "0x1944cb05" + orchestrator.toLowerCase().replace("0x", "").padStart(64, "0");
@@ -612,6 +632,22 @@ function App() {
         api(`/network/stats`).catch(() => null),
         api(`/prices/LPT/USD/latest`).catch(() => null),
       ]);
+
+      // The /delegators API reports pending_stake as of an older round (no reward
+      // accrual to the current round), so it reads low vs the official explorer.
+      // Override with the live on-chain pendingStake/pendingFees (accrued through
+      // the current round) to match explorer.livepeer.org.
+      try {
+        const endRound = await getCurrentRound();
+        if (endRound != null) {
+          const [livePendingStake, livePendingFees] = await Promise.all([
+            getPendingStake(addr, endRound),
+            getPendingFees(addr, endRound),
+          ]);
+          if (livePendingStake != null) activeDelegation.pending_stake = String(livePendingStake);
+          if (livePendingFees != null) activeDelegation.pending_fees = String(livePendingFees);
+        }
+      } catch (e) { console.warn("On-chain pending stake fetch failed:", e.message); }
 
       // Build block→round map from stake-history (already has round + block_number pairs)
       if (stakeHist?.data) {
