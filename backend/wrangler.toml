@@ -3,9 +3,9 @@ main = "worker.js"
 compatibility_date = "2024-12-01"
 
 # ───── Cron Trigger ─────
-# Runs every 30 minutes
+# Runs every 10 minutes
 [triggers]
-crons = ["*/30 * * * *"]
+crons = ["*/10 * * * *"]
 
 # ───── Public vars ─────
 [vars]
