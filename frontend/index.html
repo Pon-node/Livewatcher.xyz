@@ -1416,7 +1416,7 @@ function NotificationsModal({ wallet, subscriptions, tgUser, onClose, onChange, 
             <div className="form-group">
               <label className="form-label">Email Address</label>
               <input className="form-input" type="email" placeholder="you@example.com" value={emailAddress} onChange={e => setEmailAddress(e.target.value)} />
-              <div className="form-help">Alerts sent via <a href="https://resend.com" target="_blank">Resend</a>. Requires <code>RESEND_API_KEY</code> set on the backend and domain <code>livewatcher.xyz</code> verified in Resend.</div>
+              <div className="form-help">Alerts are sent via <a href="https://resend.com" target="_blank">Resend</a> from <code>alerts@livewatcher.xyz</code>. Check your spam folder if the confirmation doesn't arrive.</div>
             </div>
             {notifyCheckboxes}
             <button className="btn" onClick={() => createSub("email")} disabled={!emailAddress || busy} style={{width:"100%"}}>
