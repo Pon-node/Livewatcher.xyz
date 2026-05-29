@@ -1118,17 +1118,24 @@ function App() {
                         const sortedForDisplay = cutsSort === "desc"
                           ? top10Desc
                           : top10Desc.slice().reverse();
+                        // Direction-coloured cell: red ↑ on increase, green ↓ on decrease vs prior event.
+                        const cutCell = (cur, prev) => {
+                          const dir = prev == null ? null : (Number(cur) > Number(prev) ? "up" : Number(cur) < Number(prev) ? "down" : null);
+                          const color = dir === "up" ? "var(--danger)" : dir === "down" ? "var(--accent)" : undefined;
+                          return (
+                            <td style={dir ? { color } : undefined}>
+                              {pct(cur)}{dir && <span style={{ marginLeft: 6 }}>{dir === "up" ? "↑" : "↓"}</span>}
+                            </td>);
+                        };
                         return sortedForDisplay.map((c) => {
                           // For change detection, look at the chronologically-prior event in sorted (desc) array
                           const origIdx = sortedDesc.findIndex(x => x.event_id === c.event_id);
                           const prev = sortedDesc[origIdx + 1];
-                          const rcChanged = prev && c.reward_cut_percent !== prev.reward_cut_percent;
-                          const fcChanged = prev && c.fee_cut_percent !== prev.fee_cut_percent;
                           return (
                             <tr key={c.event_id}>
                               <td>{fmtDate(c.block_timestamp)}</td>
-                              <td className={rcChanged ? "changed-rc" : ""}>{pct(c.reward_cut_percent)}</td>
-                              <td className={fcChanged ? "changed-rc" : ""}>{pct(c.fee_cut_percent)}</td>
+                              {cutCell(c.reward_cut_percent, prev && prev.reward_cut_percent)}
+                              {cutCell(c.fee_cut_percent, prev && prev.fee_cut_percent)}
                               <td>{pct(c.fee_share_percent)}</td>
                             </tr>);
                         });
