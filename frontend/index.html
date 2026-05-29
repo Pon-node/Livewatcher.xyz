@@ -487,6 +487,18 @@ function App() {
   const [lastPoll, setLastPoll] = useState(null);
   const [progress, setProgress] = useState("");
   const [econView, setEconView] = useState("orchestrator");
+  // True when the watched wallet self-delegates (it IS the orchestrator).
+  const isOwnOrch = !!(activeAddr && orchestrator?.address && activeAddr.toLowerCase() === orchestrator.address.toLowerCase());
+  // Default the econ toggle to the role you're watching: a pure delegator wallet
+  // opens on "Delegator (You)", an orchestrator's own wallet on "Orchestrator".
+  // Applied once per wallet so polling/refresh doesn't clobber a manual toggle.
+  const econDefaultedRef = useRef(null);
+  useEffect(() => {
+    if (!activeAddr || !orchestrator?.address) return;
+    if (econDefaultedRef.current === activeAddr) return;
+    setEconView(isOwnOrch ? "orchestrator" : "delegator");
+    econDefaultedRef.current = activeAddr;
+  }, [activeAddr, orchestrator, isOwnOrch]);
   const [windowEarnings, setWindowEarnings] = useState(null);
   const [showNotifs, setShowNotifs] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -966,8 +978,11 @@ function App() {
               <div className="card-title">
                 <span>30-Day Net Economics</span>
                 <div className="toggle-group">
-                  <button className={`toggle-opt ${econView === "orchestrator" ? "active" : ""}`} onClick={() => setEconView("orchestrator")}>Orchestrator</button>
-                  <button className={`toggle-opt ${econView === "delegator" ? "active" : ""}`} onClick={() => setEconView("delegator")}>Delegator (You)</button>
+                  {(() => {
+                    const orchBtn = <button key="orch" className={`toggle-opt ${econView === "orchestrator" ? "active" : ""}`} onClick={() => setEconView("orchestrator")}>Orchestrator</button>;
+                    const delBtn = <button key="del" className={`toggle-opt ${econView === "delegator" ? "active" : ""}`} onClick={() => setEconView("delegator")}>Delegator (You)</button>;
+                    return isOwnOrch ? [orchBtn, delBtn] : [delBtn, orchBtn];
+                  })()}
                 </div>
               </div>
               {econToShow ? (
